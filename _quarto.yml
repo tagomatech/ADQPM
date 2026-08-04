@@ -1,0 +1,31 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Agriculture Derivatives Quantitative Portfolio Management"
+  author: ""
+  date: today
+  chapters:
+    - index.qmd
+    - module-01.qmd
+    - reading-list.qmd
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    html-math-method: mathml
+
+jupyter: python3
+
+execute:
+  echo: true
+  warning: false
+  error: false
+  freeze: false
+
+bibliography: references.bib

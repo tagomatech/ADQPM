@@ -1,0 +1,29 @@
+---
+title: "Selected reading and source map"
+description: "A living map of the theoretical, empirical, and market sources used by the monograph."
+---
+
+This is a working source map rather than a reading list to complete before studying. Chapters will point to the smallest useful sections, and the map will change as the monograph is revised.
+
+## Core commodity theory {.unnumbered}
+
+- Geman, *Commodities and Commodity Derivatives*: market structure, storage and convenience yield, stochastic commodity-price models, Black-76, agricultural markets, and spread options [@geman2005].
+- Working, “The Theory of the Price of Storage”: the inventory and convenience-yield logic underlying the theory of storage [@working1949].
+- Kaldor, “Speculation and Economic Stability”: the classic discussion of normal backwardation, inventories, and speculative markets [@kaldor1939].
+
+## Risk, curves, and portfolio management {.unnumbered}
+
+- Geman (ed.), *Risk Management in Commodity Markets*: forward-curve modelling, physical/financial risk integration, portfolio hedging, structural breaks, and commodity-derivatives risk management [@geman2008risk].
+- Fabozzi, Füss, and Kaiser (eds.), *The Handbook of Commodity Investing*: futures economics, performance measurement, portfolio risk, forecasting, systematic strategies, options, and agricultural fundamentals [@fabozzi2008].
+
+## Market and data conventions {.unnumbered}
+
+- CME Group, Corn futures product overview: contract size, quotation convention, tick size, and contract mechanics [@cmeCorn].
+- USDA, WASDE documentation: publication context for supply-and-use estimates and revisions [@usdaWasde].
+- U.S. CFTC, Commitments of Traders reports: report timing, categories, and position data conventions [@cftcCot].
+
+## How sources are used {.unnumbered}
+
+A source can provide a definition, a model, an empirical result, a market convention, or a hypothesis. Those roles will be kept distinct. Older theoretical sources remain valuable, but current exchange specifications, reporting conventions, data availability, and execution assumptions must be checked again when an application is built.
+
+This page is deliberately revisable. New sources will be added when they improve the theory, empirical discipline, agricultural specificity, or implementation quality—not simply to increase the bibliography.
