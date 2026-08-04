@@ -3,7 +3,7 @@ project:
   output-dir: _site
 
 book:
-  title: "Agriculture Derivatives Quantitative Portfolio Management"
+  title: "Agriculture Derivatives & Quantitative Portfolio Management"
   author: ""
   date: today
   chapters:

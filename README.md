@@ -1,4 +1,4 @@
-# Agriculture Derivatives Quantitative Portfolio Management
+# Agriculture Derivatives & Quantitative Portfolio Management
 
 This directory contains the executable Quarto research monograph.
 
