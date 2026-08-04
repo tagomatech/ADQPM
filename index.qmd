@@ -25,7 +25,7 @@ This is a living monograph and an initial public edition. Notation, derivations,
 
 The public book begins with a theory-first foundation: commodity-market structure, storage and convenience yield, forward curves, futures and options valuation, stochastic price processes, econometrics, portfolio construction, and risk. Coding begins with deterministic fixtures and synthetic or redistributable data so that the accounting identities and statistical procedures can be audited before live data are introduced.
 
-The Python framework grows alongside the theory. Agricultural contract, curve, fundamental, and portfolio objects belong in the domain layer. Generic stateful streaming operators, online statistics, and pipeline semantics can be contributed to Screamer when they are useful beyond agriculture; specialized agricultural logic remains in the domain layer.
+The Python framework grows alongside the theory. Agricultural contract, curve, fundamental, and portfolio objects belong in the domain layer. Generic streaming and online-statistics components should remain separate from specialized agricultural logic so that interfaces are reusable and testable.
 
 Bloomberg connectivity, proprietary observations, and terminal-specific exercises are maintained in a separate private companion project. They will inform later applications, but the public book will not depend on Bloomberg access.
 
@@ -44,7 +44,7 @@ Read the definitions and derivations before expanding the code. Treat every code
 | 5. Portfolio construction and risk | How are heterogeneous trades combined under limits? | Futures, spreads, options, cross-commodity and cross-crop risk |
 | 6. Research implementation | How does a hypothesis become a tested and monitored process? | Contract panels, public data, private adapters, attribution, model governance |
 
-The first public module is intentionally narrow: it establishes the contract-level and forward-curve language on which the later theory, signals, options, and portfolio work depend.
+Module 1 establishes the contract-level and forward-curve language. Module 2 adds physical balances, basis, and point-in-time information sets so that agricultural fundamentals can be translated into testable price hypotheses. Subsequent modules will add seasonality, stochastic models, options, portfolio construction, and risk.
 
 ## Current public scope {.unnumbered}
 

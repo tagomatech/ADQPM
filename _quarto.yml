@@ -9,6 +9,7 @@ book:
   chapters:
     - index.qmd
     - module-01.qmd
+    - module-02.qmd
     - reading-list.qmd
 
 format:
@@ -18,7 +19,9 @@ format:
     number-sections: true
     code-fold: show
     code-tools: true
-    html-math-method: mathml
+    html-math-method:
+      method: katex
+      url: assets/katex/
 
 jupyter: python3
 
@@ -27,5 +30,8 @@ execute:
   warning: false
   error: false
   freeze: false
+
+resources:
+  - assets/katex/**
 
 bibliography: references.bib

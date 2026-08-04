@@ -1,0 +1,337 @@
+---
+title: "Module 2 — Physical balances, basis, and information timing"
+description: "From agricultural balance sheets to point-in-time tradable hypotheses."
+---
+
+```{python}
+#| label: m2-setup
+#| echo: false
+
+from pathlib import Path
+import sys
+
+COURSE_ROOT = Path.cwd()
+SRC = COURSE_ROOT / "src"
+if SRC.exists() and str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from agpm.fundamentals import (
+    cash_basis,
+    ending_stocks,
+    latest_vintage_at,
+    release_surprise,
+    stocks_to_use,
+)
+from agpm.futures import CORN
+```
+
+## Scope and learning contract
+
+Module 1 defined the dated derivative and the curve. This module adds the physical state variables that make agricultural markets different from generic financial futures: production, stocks, use, exports, basis, crop calendars, and public information releases.
+
+The central distinction is between an accounting identity and an economic model. A balance sheet must add up. A low stocks-to-use ratio may be informative about scarcity. Neither fact, by itself, specifies the next futures return. The quantitative task is to construct a point-in-time state estimate, map it to a tradable price object, and evaluate the mapping without using revised or subsequently released information.
+
+By the end of the module, you should be able to:
+
+1. construct and audit a crop-year balance sheet in consistent physical units;
+2. distinguish stocks, flows, forecasts, revisions, and vintages;
+3. use stocks-to-use as a state descriptor without confusing it with convenience yield;
+4. define cash basis and derive the economics of a futures hedge;
+5. build a point-in-time information set from release timestamps;
+6. turn a physical hypothesis into a testable futures, spread, or basis hypothesis.
+
+## 1. The balance sheet is a conservation law
+
+For a commodity and accounting period $t$, write the simplified balance identity as
+
+$$
+S^{E}_t
+= S^{B}_t + P_t + I_t - U_t - X_t - L_t,
+$$
+
+where:
+
+- $S^{B}_t$ and $S^{E}_t$ are beginning and ending stocks;
+- $P_t$ is production;
+- $I_t$ is imports;
+- $U_t$ is domestic use or disappearance;
+- $X_t$ is exports;
+- $L_t$ is other disappearance, losses, or residual adjustment.
+
+The accounting period is usually a marketing year rather than a calendar year. For corn, the crop year, harvest timing, marketing-year definition, and delivery months do not line up perfectly. That mismatch is not a nuisance to be silently removed: it is part of the market mechanism.
+
+The identity is useful for three reasons. First, it catches unit and sign errors. Second, it makes revisions explicit: a change in production or use must appear somewhere in ending stocks. Third, it separates a physical state estimate from the market price that may already discount it.
+
+The framework exposes the identity directly:
+
+```{python}
+balance = pd.DataFrame(
+    {
+        "marketing_year": ["2025/26", "2026/27", "2027/28"],
+        "beginning_stocks_m_bushels": [1_760, 1_540, 1_820],
+        "production_m_bushels": [15_800, 16_400, 16_050],
+        "imports_m_bushels": [25, 25, 25],
+        "domestic_use_m_bushels": [6_200, 6_350, 6_400],
+        "exports_m_bushels": [5_845, 5_795, 5_900],
+        "other_disappearance_m_bushels": [0, 0, 0],
+    }
+)
+
+balance["ending_stocks_m_bushels"] = ending_stocks(
+    balance["beginning_stocks_m_bushels"],
+    balance["production_m_bushels"],
+    balance["imports_m_bushels"],
+    balance["domestic_use_m_bushels"],
+    balance["exports_m_bushels"],
+    balance["other_disappearance_m_bushels"],
+)
+balance
+```
+
+The calculation is deliberately boring. A balance-sheet function should not forecast, smooth, or infer a price. It should make the conservation equation reproducible and auditable. If a reported table does not reconcile, the discrepancy should be labelled as a residual or data-quality issue rather than hidden inside a model.
+
+All terms must use the same unit and period. Mixing bushels with metric tonnes, crop years with calendar years, or a revised production estimate with an unrevised use estimate can create a numerically precise but economically meaningless feature. Unit conversions belong in a documented data layer; the balance function should receive normalized inputs.
+
+## 2. Stocks-to-use is a state descriptor, not a price forecast
+
+Define total use as
+
+$$
+T_t = U_t + X_t + L_t,
+$$
+
+and the stocks-to-use ratio as
+
+$$
+R_t = \frac{S^{E}_t}{T_t}.
+$$
+
+The ratio is dimensionless and allows scale comparison across years. It is often a useful scarcity proxy because a given inventory level is more consequential when expected use is large. It is not, however, a universal structural measure of convenience yield. Quality, location, deliverability, inventory ownership, financing, and expectations all matter.
+
+```{python}
+balance["total_use_m_bushels"] = (
+    balance["domestic_use_m_bushels"]
+    + balance["exports_m_bushels"]
+    + balance["other_disappearance_m_bushels"]
+)
+balance["stocks_to_use"] = stocks_to_use(
+    balance["ending_stocks_m_bushels"],
+    balance["total_use_m_bushels"],
+)
+balance[["marketing_year", "ending_stocks_m_bushels", "total_use_m_bushels", "stocks_to_use"]]
+```
+
+The economic interpretation must be conditional. A low ratio can coincide with backwardation, a stronger nearby basis, and high implied volatility, but it can also coexist with a weak price if demand is being revised down or if the scarcity is already reflected in the curve. A balance-sheet feature should therefore be compared with the contemporaneous futures curve, basis, volatility, and market expectation—not treated as an isolated directional signal.
+
+A simple visualization is useful for inspecting the state space, but it is not evidence of a stable relation:
+
+```{python}
+fig, ax = plt.subplots(figsize=(7, 4))
+ax.scatter(balance["stocks_to_use"], balance["ending_stocks_m_bushels"], s=70)
+for _, row in balance.iterrows():
+    ax.annotate(row["marketing_year"], (row["stocks_to_use"], row["ending_stocks_m_bushels"]), xytext=(5, 5), textcoords="offset points")
+ax.set_xlabel("Ending stocks / total use")
+ax.set_ylabel("Ending stocks (million bushels)")
+ax.set_title("Illustrative balance-sheet state space")
+ax.grid(alpha=0.25)
+plt.show()
+```
+
+The natural research comparison is often not the level of $R_t$ but its change, surprise, percentile, or deviation from a crop-calendar-conditioned expectation. Each transformation changes the hypothesis. For example:
+
+- level: scarcity state;
+- change: tightening or loosening balance;
+- surprise: information arrival relative to expectation;
+- percentile: unusually scarce or abundant state relative to a vintage history;
+- forecast revision: new information rather than a static crop-year label.
+
+## 3. Physical state and the forward curve
+
+Module 1 introduced the stylized storage relation
+
+$$
+F(t,T) = S_t\exp\left((r+c-y)(T-t)\right),
+$$
+
+where $r$ is financing, $c$ is storage and insurance cost, and $y$ is convenience yield. The physical state enters this relation through the value of having inventory available at a particular time and location. The balance sheet is therefore one input to the curve, not a replacement for the curve.
+
+A useful conceptual decomposition is:
+
+$$
+\text{observed deferred-nearby price difference}
+= \text{financing} + \text{storage} - \text{scarcity service}
++ \text{risk premium} + \text{measurement error}.
+$$
+
+This is not an identity with directly observable components. It is a research map. Storage costs may be nonlinear; inventories may be unavailable to the marginal buyer; the cash price may contain location and quality premia; and the risk premium can vary through time. A regression of a spread on stocks-to-use should therefore be interpreted as a reduced-form relation whose stability must be tested across crop years and regimes.
+
+The practical object is a joint panel. At each decision timestamp, preserve the physical vintage, the futures contracts, the delivery dates, the local cash price, and the market expectation that was observable at that time. Only then can the curve be used to ask whether a fundamental change was already priced.
+
+## 4. Basis is the local hedge variable
+
+For local cash price $P^{\mathrm{cash}}_{\ell,t}$ and the relevant futures price $F_{i,t}$, define basis as
+
+$$
+b_{\ell,i,t} = P^{\mathrm{cash}}_{\ell,t} - F_{i,t}.
+$$
+
+The sign convention must be stated. A producer who sells the commodity and shorts futures at $t_0$ receives, ignoring costs,
+
+$$
+P^{\mathrm{cash}}_{\ell,T} - (F_{i,T}-F_{i,t_0})
+= F_{i,t_0} + b_{\ell,i,T}.
+$$
+
+The final net price depends on the basis at the time the physical sale is made. Futures price risk has been exchanged for basis risk. A buyer using the opposite hedge obtains the analogous net-cost expression.
+
+This is why a successful futures directional forecast is not necessarily a successful physical hedge, and why a basis model can add value even when the futures level is difficult to forecast. The relevant risk is often the change in basis, together with contract mismatch, location, grade, timing, liquidity, and execution costs.
+
+```{python}
+hedge = pd.DataFrame(
+    {
+        "date": pd.date_range("2026-09-01", periods=5, freq="B"),
+        "local_cash": [4.02, 4.05, 4.11, 4.09, 4.18],
+        "december_futures": [4.20, 4.22, 4.25, 4.24, 4.27],
+    }
+)
+hedge["basis"] = cash_basis(hedge["local_cash"], hedge["december_futures"])
+hedge
+```
+
+The relevant hedge ratio is not always one. A local cash exposure may be hedged with a futures contract of a different grade, location, or delivery month. Estimating a hedge ratio is a later portfolio problem: it requires a clear loss function, a stable sample, treatment of seasonality, and an explicit decision about whether the goal is variance minimization, downside control, expected margin, or another objective.
+
+## 5. Release timestamps define the information set
+
+A report can refer to a past crop year and still be new information. The decision-time information set is better written as
+
+$$
+\mathcal{I}_t = \{D_j : \text{release\_time}_j \leq t\}.
+$$
+
+A signal is admissible only if it is a function of $\mathcal{I}_t$. A revised estimate that was published after the trade cannot be used to reconstruct the earlier signal, even if it describes the same marketing year.
+
+For agricultural reports, preserve at least:
+
+- the period or marketing year to which the observation refers;
+- the release date and exact release time, including timezone;
+- the vintage or revision number;
+- the value available in that vintage;
+- the market expectation, if the research uses a surprise;
+- the price and liquidity window used to measure the response.
+
+The point-in-time selector below keeps only information released before the decision timestamp and, when requested, retains the latest vintage for each marketing year:
+
+```{python}
+vintages = pd.DataFrame(
+    {
+        "release_time": pd.to_datetime(
+            ["2026-08-12 17:00", "2026-09-11 17:00", "2026-09-11 17:00"]
+        ),
+        "marketing_year": ["2026/27", "2026/27", "2027/28"],
+        "ending_stocks_m_bushels": [1_900, 1_750, 2_100],
+        "vintage": ["August", "September", "September"],
+    }
+)
+
+available_before_september_report = latest_vintage_at(
+    vintages,
+    "2026-09-01 12:00",
+    keys=["marketing_year"],
+)
+available_after_september_report = latest_vintage_at(
+    vintages,
+    "2026-09-12 12:00",
+    keys=["marketing_year"],
+)
+
+available_before_september_report, available_after_september_report
+```
+
+The second table is not a corrected version of history. It is a later information set. A backtest that uses the September value before 11 September has look-ahead bias even if the model is otherwise sophisticated.
+
+## 6. Surprises are defined relative to expectations
+
+A report surprise is not simply “the number changed.” The market trades the difference between the released value and what was expected:
+
+$$
+\varepsilon_t = A_t - E_t,
+$$
+
+where $A_t$ is the released observation and $E_t$ is the expectation observable immediately before release. The expectation may be a survey median, an analyst consensus, a market-implied estimate, or a model forecast. These are different objects and should not be pooled casually.
+
+```{python}
+reported_stocks = 1_750
+market_expectation = 1_840
+surprise = release_surprise(reported_stocks, market_expectation)
+pd.DataFrame(
+    {
+        "reported_stocks_m_bushels": [reported_stocks],
+        "market_expectation_m_bushels": [market_expectation],
+        "stocks_surprise_m_bushels": [surprise],
+        "interpretation": ["tighter-than-expected stocks" if surprise < 0 else "looser-than-expected stocks"],
+    }
+)
+```
+
+The sign of a fundamental surprise is not automatically the sign of a futures return. A tighter stocks surprise may be bullish for nearby scarcity while the deferred contract is less affected; or the market may have anticipated the number; or demand may be revised in the same release. The tradable question must specify the price object and horizon—for example, the nearby/deferred spread over the first 30 minutes, the basis over the following five business days, or the volatility response into the report.
+
+## 7. From physical hypothesis to tradable object
+
+A professional research specification connects the physical variable to the exact trade:
+
+| Physical state or information | Transformation | Tradable object | Main failure mode |
+|:--|:--|:--|:--|
+| Stocks-to-use | Vintage percentile by crop year | Nearby/deferred spread | Seasonal pooling and already-priced scarcity |
+| Production revision | Reported minus prior expectation | Outright futures or option delta | Release timing and expectation error |
+| Export forecast change | Vintage change with publication timestamp | Deferred futures or inter-commodity spread | Demand substitution and liquidity |
+| Local cash basis | Basis level or change | Hedge overlay or calendar spread | Location, grade, and delivery mismatch |
+| Weather estimate | Forecast surprise by crop stage | Volatility or event structure | Revisions, correlation, and crowded events |
+
+For example, a defensible first hypothesis might be:
+
+> Conditional on a negative corn ending-stocks surprise released before the session’s liquid trading window, the September-to-December spread response differs from its unconditional response, after controlling for pre-release spread level, realized volatility, transaction costs, and crop-calendar bucket.
+
+This statement is intentionally narrower than “low stocks are bullish.” It identifies the information event, the price object, the conditional controls, and the evaluation problem. It can be falsified.
+
+## 8. Research controls and implementation checklist
+
+Before using a balance-derived feature in a portfolio backtest, verify:
+
+1. **Accounting:** all flows reconcile and use the same physical unit and period.
+2. **Vintage:** every value is available at the simulated decision timestamp.
+3. **Expectation:** the surprise benchmark was observable before the release.
+4. **Contract mapping:** the futures contract is identified by delivery month, not a continuous ticker alone.
+5. **Seasonality:** crop-year and delivery-month effects are represented explicitly.
+6. **Basis:** local cash prices, grade, location, and delivery timing are defined.
+7. **Execution:** report-day entry, bid/ask, slippage, limits, and liquidity are modelled.
+8. **Evaluation:** the signal is tested walk-forward, with out-of-sample attribution.
+9. **Portfolio impact:** the trade is expressed in risk units and aggregated with existing curve, outright, and volatility exposures.
+
+The critical data distinction is between an estimate and an observation. A balance-sheet estimate is a model output with uncertainty. It should enter the portfolio as a time-stamped forecast or distribution, not as an ex post fact.
+
+## Review checkpoint
+
+You should be able to answer these without looking at the code:
+
+1. Which terms in the balance identity are stocks and which are flows?
+2. Why can a lower stocks-to-use ratio coincide with a lower futures price?
+3. Derive the producer’s net price when the producer sells cash and shorts futures.
+4. What is the difference between a report revision and a report surprise?
+5. Why must the release timestamp be stored separately from the marketing year?
+6. Give two reasons why a basis model can be valuable even if outright futures returns are difficult to forecast.
+7. What changes when a physical signal is mapped to a calendar spread instead of an outright contract?
+8. Which part of the table above is an economic assumption rather than an accounting identity?
+
+## Focused reading
+
+- Geman, *Commodities and Commodity Derivatives*, Chapters 1–3, for storage, convenience yield, and the relationship between physical availability and derivative prices [@geman2005].
+- Working, “The Theory of the Price of Storage,” for the economics of storage and the interpretation of futures spreads [@working1949].
+- Borovkova and Geman in *Risk Management in Commodity Markets*, Chapter 2, for curve factors, seasonality, and commodity-specific modelling [@geman2008risk].
+- USDA WASDE documentation for the structure and release timing of agricultural balance estimates [@usdaWasde].
+- CFTC COT documentation for report timing, positioning categories, and the distinction between reportable derivatives positions and the physical market [@cftcCot].
+
+The next module will use these physical and information-set objects to study agricultural seasonality, basis dynamics, and robust signal construction before moving to options and volatility.
