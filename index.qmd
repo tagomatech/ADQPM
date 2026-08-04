@@ -2,7 +2,7 @@
 title: "Overview"
 ---
 
-This is an executable course and research monograph on **Agricultural Derivatives and Quantitative Portfolio Management**. It develops the theory, empirical methods, and implementation architecture needed to analyze, trade, and manage agricultural derivative portfolios using futures, options, physical-market information, and explicit risk constraints.
+This is an executable course and research monograph on **Agriculture Derivatives & Quantitative Portfolio Management**. It develops the theory, empirical methods, and implementation architecture needed to analyze, trade, and manage agricultural derivative portfolios using futures, options, physical-market information, and explicit risk constraints.
 
 The purpose is to connect higher-education financial theory to the decisions made by a real derivatives portfolio: what is traded, how it is priced and marked, which risks are carried, how evidence is generated, and how a position is sized, monitored, and attributed.
 
