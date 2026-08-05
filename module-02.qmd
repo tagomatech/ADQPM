@@ -190,6 +190,8 @@ The final net price depends on the basis at the time the physical sale is made. 
 
 This is why a successful futures directional forecast is not necessarily a successful physical hedge, and why a basis model can add value even when the futures level is difficult to forecast. The relevant risk is often the change in basis, together with contract mismatch, location, grade, timing, liquidity, and execution costs.
 
+The VSR example in Module 1 is a useful reminder that basis and convergence cannot always be analysed independently of exchange design. In deliverable wheat, a rule governing certificate storage charges can move part of the convergence economics into calendar spreads. A basis model should therefore retain the applicable delivery rule, contract month, grade, location, and observation window as state variables rather than treating convergence as a purely statistical tendency.
+
 ```{python}
 hedge = pd.DataFrame(
     {

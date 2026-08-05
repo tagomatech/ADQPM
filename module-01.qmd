@@ -96,6 +96,30 @@ This is not the same as a percentage return on capital. Futures require margin r
 
 Initial margin is a collateral requirement, not an economic measure of maximum loss. A position can lose substantially more than its initial margin, especially through a limit move, gap, illiquid contract, or option-induced hedge failure.
 
+::: {.callout-note}
+## Forward versus futures: the delivery idea is similar, the cash-flow process is not
+
+A **forward** is a bilateral over-the-counter agreement to exchange a specified quantity and quality of a commodity at a future date for a price agreed today. The terms can be tailored to location, grade, delivery window, credit support, and settlement. A **futures contract** is standardized by the exchange, cleared through a central counterparty, and marked to market through daily variation margin. It can be closed before delivery or completed through the exchange's delivery procedure.
+
+In the simplified deterministic-rate model, the value of one long forward with delivery price $K$ is
+
+$$
+V_t^{\mathrm{fwd}}
+= M D(t,T)\left(F_t^{\mathrm{fwd}}(T)-K\right),
+$$
+
+where $D(t,T)$ is the discount factor and $F_t^{\mathrm{fwd}}(T)$ is the current forward price for the same delivery terms. At maturity, the undiscounted delivery payoff is $M(S_T-K)$, before settlement adjustments and transaction costs. A long futures position instead produces daily settlement cash flows
+
+$$
+\Delta \Pi_t^{\mathrm{fut}}
+= M\left(F_t^{\mathrm{fut}}-F_{t-1}^{\mathrm{fut}}\right).
+$$
+
+These are different P&L processes. Forward value is normally accumulated until settlement, subject to collateral terms; futures gains and losses arrive during the life of the position and can be financed or reinvested. Under deterministic interest rates and matching delivery terms, the standard no-arbitrage model gives the same forward and futures price. With stochastic rates, daily settlement creates a convexity or cash-flow adjustment, whose sign and size depend on the joint dynamics of rates and the commodity price. It may be small relative to agricultural basis and storage risk, but it should not be silently omitted from valuation, P&L attribution, or hedge accounting [@geman2005; @geman2008risk].
+
+For research, this distinction has three practical consequences: record variation-margin cash flows separately from economic mark-to-market exposure; do not use a discounted forward-value formula as a futures daily P&L calculation; and state the interest-rate assumption whenever a forward price is substituted for a futures price.
+:::
+
 ## 3. Calendar spreads are portfolios of legs
 
 For a nearby contract $n$ and a deferred contract $d$, define the quoted deferred-minus-nearby spread as
@@ -157,6 +181,67 @@ The important economic interpretation is:
 - the observed curve is not a pure forecast of the future spot price.
 
 This is the central caution in the theory of storage: the curve is simultaneously a market price, a physical allocation signal, and a risk-premium-bearing financial object [@working1949; @kaldor1939; @geman2005]. A desk may use the curve to infer the state of inventory scarcity, but it must not call the raw slope “carry” without defining the financing, storage, quality, location, and delivery assumptions.
+
+::: {.callout-important}
+## Exchange rule in the storage model: Variable Storage Rates
+
+The **Variable Storage Rate (VSR)** is a market-based rule for physically delivered CBOT Wheat futures. It is not a generic property of agricultural futures and it is not a current CBOT Corn mechanism. VSR changes the maximum storage charge that an approved delivery facility may charge the holder of an outstanding wheat shipping certificate. The relevant exchange rule therefore belongs to the futures delivery system, not to the abstract cost-of-carry equation alone [@cmeVsr].
+
+The connection with the theory of storage is direct. Storage capacity is scarce in the short run, and its marginal value can be higher in a large crop or when available space is constrained. If the exchange-imposed maximum certificate-storage charge is below the physical value of storage, the certificate can be economically too attractive to hold. The cash price paid to farmers can then remain materially below the futures price at delivery: the cash–futures convergence mechanism is impaired. CME introduced VSR to make the allowable storage charge respond to the market's observed calendar-spread incentive and to improve convergence [@cmeVsrFaq].
+
+For an adjacent nearby/deferred pair, define the spread and a CME-style financial full-carry benchmark as
+
+$$
+s_{n,d}=F_d-F_n,
+\qquad
+\mathrm{FFC}=N\left[\left(\frac{i}{360}\right)F_n+s_d\right],
+$$
+
+where $N$ is the number of calendar days, $i$ is the annual interest rate, and $s_d$ is the daily storage charge, all in dollars per bushel. The exchange compares the relevant spread with this benchmark over an observation period. In the current rule description, an average at or above 80% of financial full carry increases the maximum storage rate by 0.10 cents per bushel per day; an average at or below 50% decreases it by the same amount; and an average between those thresholds leaves it unchanged. Floors, evaluation windows, and other delivery details are exchange rules and can change, so they must be read from current CME documentation rather than hard-coded as timeless theory [@cmeVsr].
+
+The trading implications are more subtle than “contango is bullish for storage”:
+
+- a calendar spread is partly a physical-storage instrument, and its fair-value map changes when the allowed certificate-storage charge changes;
+- VSR is a feedback rule: the spread relative to financial full carry influences a future storage rate, while that rate also enters the carry benchmark used to interpret the spread;
+- a trader must monitor the observation window, trigger thresholds, current storage rate, delivery eligibility, certificate economics, basis, liquidity, and margin—not just the displayed spread;
+- a convergence trade is not risk-free. Location and grade basis, logistics, timing, execution, limit moves, financing, and the possibility of rule changes remain material risks.
+
+This is also why the relevant phrase here is **cash–futures convergence**, not cash–forward convergence. A bilateral forward can be written with bespoke delivery and settlement terms; VSR governs the standardized exchange delivery mechanism through which a futures position can become a wheat shipping certificate. The mechanism will return later when basis, delivery optionality, and calendar-spread risk are modelled jointly [@cmeVsrFaq].
+:::
+
+The formula is easy to misread if the financial-full-carry denominator is hidden. The following is an illustrative CME educational example, not a live VSR calculation or a current market observation. It makes the units and trigger logic explicit.
+
+```{python}
+vsr_example = pd.DataFrame(
+    {
+        "days": [62],
+        "nearby_price_usd_per_bushel": [5.75],
+        "interest_rate": [0.025],
+        "daily_storage_usd_per_bushel": [0.00165],
+        "calendar_spread_usd_per_bushel": [0.12],
+    }
+)
+vsr_example["financial_full_carry"] = vsr_example["days"] * (
+    vsr_example["interest_rate"] / 360
+    * vsr_example["nearby_price_usd_per_bushel"]
+    + vsr_example["daily_storage_usd_per_bushel"]
+)
+vsr_example["spread_pct_ffc"] = (
+    vsr_example["calendar_spread_usd_per_bushel"]
+    / vsr_example["financial_full_carry"]
+)
+vsr_example["illustrative_trigger"] = np.select(
+    [
+        vsr_example["spread_pct_ffc"] >= 0.80,
+        vsr_example["spread_pct_ffc"] <= 0.50,
+    ],
+    ["increase", "decrease"],
+    default="unchanged",
+)
+vsr_example
+```
+
+The example gives approximately 12.70 cents per bushel of financial full carry and a spread at approximately 94.4% of that benchmark, so it falls in the “increase” region under the simplified rule. The calculation is valuable because it exposes a rule-sensitive spread diagnostic; it is not evidence that a particular wheat spread is mispriced.
 
 For adjacent contracts, a curve panel should expose both an absolute and a relative slope. The absolute slope is quoted in dollars per bushel per year; the logarithmic slope is a continuously compounded price-ratio rate. The following cell computes both for every adjacent pair and labels the observable curve state. This is the useful role of code here: it makes the transformation from a dated price panel to a candidate curve-state feature auditable.
 

@@ -7,7 +7,7 @@ This is a working source map rather than a reading list to complete before study
 
 ## Core commodity theory {.unnumbered}
 
-- Geman, *Commodities and Commodity Derivatives*: market structure, storage and convenience yield, stochastic commodity-price models, Black-76, agricultural markets, and spread options [@geman2005].
+- Geman, *Commodities and Commodity Derivatives*: market structure, storage and convenience yield, stochastic commodity-price models, Black-76, agricultural markets, and spread options. Sections 1.2 and 2.6–2.7 are especially relevant for forward/futures mechanics, market value, and P&L timing [@geman2005].
 - Working, “The Theory of the Price of Storage”: the inventory and convenience-yield logic underlying the theory of storage [@working1949].
 - Kaldor, “Speculation and Economic Stability”: the classic discussion of normal backwardation, inventories, and speculative markets [@kaldor1939].
 
@@ -19,6 +19,7 @@ This is a working source map rather than a reading list to complete before study
 ## Market and data conventions {.unnumbered}
 
 - CME Group, Corn futures product overview: contract size, quotation convention, tick size, and contract mechanics [@cmeCorn].
+- CME Group, Variable Storage Rates and FAQ: the exchange-specific storage-charge rule, financial full carry, calendar-spread triggers, and cash–futures convergence in physically delivered wheat [@cmeVsr; @cmeVsrFaq].
 - USDA, WASDE documentation: publication context for supply-and-use estimates and revisions [@usdaWasde].
 - U.S. CFTC, Commitments of Traders reports: report timing, categories, and position data conventions [@cftcCot].
 
