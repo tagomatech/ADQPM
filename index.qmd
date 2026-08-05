@@ -44,8 +44,8 @@ Read the definitions and derivations before expanding the code. Treat every code
 | 5. Portfolio construction and risk | How are heterogeneous trades combined under limits? | Futures, spreads, options, cross-commodity and cross-crop risk |
 | 6. Research implementation | How does a hypothesis become a tested and monitored process? | Contract panels, public data, private adapters, attribution, model governance |
 
-Module 1 establishes the contract-level and forward-curve language. Module 2 adds physical balances, basis, and point-in-time information sets so that agricultural fundamentals can be translated into testable price hypotheses. Subsequent modules will add seasonality, stochastic models, options, portfolio construction, and risk.
+Module 1 establishes the contract-level and forward-curve language. Module 2 adds physical balances, basis, and point-in-time information sets so that agricultural fundamentals can be translated into testable price hypotheses. Module 3 adds seasonality, basis dynamics, and rigorous signal validation. Subsequent modules will add stochastic models, options, portfolio construction, and risk.
 
 ## Current public scope {.unnumbered}
 
-Module 1 contains the first contract-level lesson. Subsequent modules will add agricultural supply-demand balances, weather and crop information, basis, seasonality, stochastic models, options, portfolio construction, and risk. The selected reading and source map appears after the current modules and will evolve with the book.
+Module 1 establishes the contract-level and forward-curve language. Module 2 develops physical balances, basis, and point-in-time information sets. Module 3 develops seasonality, basis dynamics, and rigorous signal validation. Subsequent modules will add stochastic models, options, portfolio construction, and risk. The selected reading and source map appears after the current modules and will evolve with the book.

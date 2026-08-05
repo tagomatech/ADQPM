@@ -10,6 +10,14 @@ from .futures import (
     curve_snapshot,
     long_roll_return,
 )
+from .research import (
+    expanding_group_zscore,
+    grouped_zscore,
+    performance_summary,
+    strategy_pnl,
+    threshold_position,
+    walk_forward_splits,
+)
 
 __all__ = [
     "CORN",
@@ -19,5 +27,11 @@ __all__ = [
     "annualized_spread_slope",
     "contract_pnl",
     "curve_snapshot",
+    "expanding_group_zscore",
+    "grouped_zscore",
     "long_roll_return",
+    "performance_summary",
+    "strategy_pnl",
+    "threshold_position",
+    "walk_forward_splits",
 ]

@@ -1,0 +1,360 @@
+---
+title: "Module 3 — Seasonality, basis dynamics, and signal validation"
+description: "How agricultural observations become point-in-time, cost-aware, and falsifiable trading signals."
+---
+
+```{python}
+#| label: m3-setup
+#| echo: false
+
+from pathlib import Path
+import sys
+
+COURSE_ROOT = Path.cwd()
+SRC = COURSE_ROOT / "src"
+if SRC.exists() and str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from agpm.fundamentals import cash_basis
+from agpm.research import (
+    expanding_group_zscore,
+    grouped_zscore,
+    performance_summary,
+    strategy_pnl,
+    threshold_position,
+    walk_forward_splits,
+)
+```
+
+## Scope and learning contract
+
+Module 2 introduced physical balances, basis, report surprises, and point-in-time data. This module addresses the next research problem: how to transform those observations into a signal without mistaking a seasonal average, a revised number, or a backtest artefact for an exploitable return.
+
+The unit of analysis is a complete research chain:
+
+$$
+\text{observation}
+\longrightarrow
+\text{information-set feature}
+\longrightarrow
+\text{score}
+\longrightarrow
+\text{lagged position}
+\longrightarrow
+\text{net P\&L}
+\longrightarrow
+\text{out-of-sample evidence}.
+$$
+
+A signal is not a chart and a backtest is not a proof. The purpose of the framework is to make every transformation, timestamp, unit, cost, and failure mode visible.
+
+By the end of the module, you should be able to:
+
+1. distinguish deterministic calendar structure from a conditional seasonal signal;
+2. standardize an observation using only information available before the decision;
+3. separate basis level, basis change, and futures return;
+4. map a score into a lagged target position with explicit turnover costs;
+5. construct walk-forward train/test windows without contaminating the test set;
+6. report performance, drawdown, turnover, and attribution without overclaiming.
+
+## 1. Seasonality is a conditional distribution
+
+Let $x_t$ be a price, basis, spread, or fundamental feature and let $m(t)$ denote a calendar or crop-calendar bucket. A first decomposition is
+
+$$
+x_t = \mu_{m(t)} + \varepsilon_t.
+$$
+
+The seasonal mean $\mu_{m(t)}$ is a description of the unconditional path. It is not automatically a forecast of an abnormal return. In an agricultural market, the relevant conditioning variables may include:
+
+- delivery month and time to delivery;
+- crop year and harvest stage;
+- stocks-to-use and inventory location;
+- expected production and demand revisions;
+- basis and curve state;
+- volatility, liquidity, and report calendar.
+
+A January-to-March corn spread and a September-to-December corn spread may have the same nominal tenor but different harvest, storage, and delivery economics. Pooling them because their time gaps match can destroy the mechanism the research is trying to measure.
+
+A descriptive grouped z-score is useful for inspecting seasonal structure:
+
+```{python}
+seasonal_fixture = pd.DataFrame(
+    {
+        "crop_bucket": ["harvest", "harvest", "storage", "storage"],
+        "basis": [-0.18, -0.10, -0.04, 0.02],
+    }
+)
+seasonal_fixture["descriptive_z"] = grouped_zscore(
+    seasonal_fixture["basis"],
+    seasonal_fixture["crop_bucket"],
+)
+seasonal_fixture
+```
+
+This calculation uses the complete supplied sample within each bucket. It is therefore descriptive, not a valid historical trading signal when the sample contains future observations relative to an earlier row. The distinction is not semantic: using future observations to estimate the seasonal mean and scale creates look-ahead bias.
+
+## 2. Point-in-time seasonal normalization
+
+For a tradable score at time $t$, estimate the seasonal reference distribution from earlier observations only:
+
+$$
+z_t = \frac{x_t - \widehat{\mu}_{m(t),t^-}}
+{\widehat{\sigma}_{m(t),t^-}}.
+$$
+
+The superscript $t^-$ means that the current observation is excluded from its own reference distribution. In a production implementation, the reference window also needs explicit rules for missing data, revisions, structural breaks, minimum history, and whether the statistic is expanding or rolling.
+
+The framework provides an auditable expanding estimator. It returns `NaN` until a bucket has sufficient prior history:
+
+```{python}
+dates = pd.bdate_range("2022-01-03", periods=180)
+rng = np.random.default_rng(7)
+month = pd.Series(dates.month, index=dates, name="month")
+seasonal_component = month.map(
+    {
+        1: -0.03, 2: -0.02, 3: -0.01, 4: 0.00,
+        5: 0.02, 6: 0.04, 7: 0.03, 8: 0.01,
+        9: -0.02, 10: -0.04, 11: -0.03, 12: -0.02,
+    }
+)
+basis = pd.Series(
+    seasonal_component.to_numpy() + rng.normal(0.0, 0.025, len(dates)),
+    index=dates,
+    name="basis",
+)
+basis_score = expanding_group_zscore(
+    basis,
+    month,
+    min_history=10,
+)
+pd.DataFrame({"basis": basis, "month": month, "point_in_time_z": basis_score}).tail()
+```
+
+The initial `NaN` values are part of the data-generating process for the strategy. They cannot be silently replaced by a full-sample mean. A realistic backtest may use a longer history, a rolling window, shrinkage toward a broader group, or a hierarchical seasonal model, but each choice must be estimated inside the allowed information set.
+
+A useful diagnostic is to compare the descriptive and point-in-time versions. If a signal looks strong only when the full sample is used, that is evidence of estimation leakage rather than evidence of a trading opportunity.
+
+## 3. Basis level, basis change, and hedge P&L
+
+For local cash price $P^{\mathrm{cash}}_t$ and futures price $F_t$, basis is
+
+$$
+b_t = P^{\mathrm{cash}}_t - F_t.
+$$
+
+The basis change is
+
+$$
+\Delta b_t = \Delta P^{\mathrm{cash}}_t - \Delta F_t.
+$$
+
+These are different research objects:
+
+- a basis **level** can reflect location, grade, delivery, and long-run structural conditions;
+- a basis **change** is closer to the residual risk of a hedge over an interval;
+- an outright futures **return** is exposure to the exchange-traded contract;
+- a cash-plus-futures hedge **P&L** depends on the physical position, hedge ratio, contract multiplier, and timing.
+
+A model of basis level can be non-stationary even when a short-horizon basis change is useful. Conversely, a mean-reverting basis statistic can be economically irrelevant if the physical exposure cannot be executed at the assumed location or timing.
+
+```{python}
+hedge_panel = pd.DataFrame(
+    {
+        "cash": [4.02, 4.05, 4.11, 4.09, 4.18],
+        "futures": [4.20, 4.22, 4.25, 4.24, 4.27],
+    },
+    index=pd.bdate_range("2026-09-01", periods=5),
+)
+hedge_panel["basis"] = cash_basis(hedge_panel["cash"], hedge_panel["futures"])
+hedge_panel["basis_change"] = hedge_panel["basis"].diff()
+hedge_panel["futures_change"] = hedge_panel["futures"].diff()
+hedge_panel
+```
+
+The sign convention determines the interpretation. A producer who is short futures benefits from a futures price decline, but the realized net selling price is still controlled by the basis at the physical sale. The hedge model must therefore define whether its target is basis variance, realized cash price variance, downside loss, or a commercial margin.
+
+## 4. A signal is not a position
+
+Let $s_t$ be a score derived from the information set. A target position is a separate function:
+
+$$
+q_t = g(s_t),
+$$
+
+where $g$ may be a sign rule, threshold rule, volatility-scaled rule, or portfolio optimizer. The trade cannot use $q_t$ to earn the return from the same observation unless the execution convention explicitly permits it. A conservative daily convention is:
+
+$$
+\Pi_{t+1}^{\mathrm{gross}} = q_t r_{t+1},
+$$
+
+where $r_{t+1}$ is the next-period return of the defined tradable object.
+
+A threshold rule can deliberately avoid trading small or noisy scores:
+
+```{python}
+position = threshold_position(
+    -basis_score,
+    threshold=1.0,
+    max_position=1.0,
+)
+pd.DataFrame(
+    {
+        "basis": basis,
+        "score": basis_score,
+        "target_position": position,
+    }
+).dropna().tail()
+```
+
+The negative sign above represents a *hypothetical* mean-reversion mapping: a basis unusually high relative to its historical seasonal reference produces a short target. It is not a claim that basis mean reverts, nor a recommendation to trade it. The economic mechanism, hedgeability, and regime stability must be tested.
+
+Position rules also encode risk. A binary signal is not neutral simply because its notional is small: its volatility, liquidity, margin, gap exposure, and correlation with existing positions determine its portfolio risk. Position sizing belongs to the portfolio layer, but the signal layer must expose its target position and turnover clearly.
+
+## 5. Costs belong in the primary P&L equation
+
+Let $c$ be the cost per unit of turnover and $q_t$ the target position. With the return indexed at its realization time, a one-period execution lag gives the net-return equation
+
+$$
+\Pi_{t+1}^{\mathrm{net}}
+= q_t r_{t+1} - c\left|q_t-q_{t-1}\right|.
+$$
+
+The absolute position change is a first-order proxy for bid/ask crossing, commissions, exchange fees, and slippage. The helper also charges the initial move from zero into the target position. A professional implementation may replace the linear approximation with a market-impact model, but it should not omit trading frictions merely because the signal is theoretical.
+
+The framework makes the lag and cost deductions explicit:
+
+```{python}
+basis_return = basis.diff() / 4.25
+backtest = strategy_pnl(
+    position,
+    basis_return,
+    position_lag=1,
+    cost_per_unit_turnover=0.0005,
+)
+backtest["net_pnl"].dropna().head()
+```
+
+The return must be defined before the backtest starts. Here basis_return is indexed at the period in which the basis change is realized, so position_lag=1 maps the signal observed at time $t$ to the return realized at $t+1$. Dividing a basis change by 4.25 creates a normalized illustrative return; it is not a CME contract return and does not include the corn multiplier. For a real calendar spread, the return should be derived from the marked two-leg portfolio, including leg multipliers, execution prices, margin, and costs.
+
+A common error is to use a signal on a daily close, multiply it by the same close-to-close return, and then subtract a small generic cost. That convention can embed an impossible trade at the closing price and understate the cost of changing the position. The research record should state signal timestamp, execution timestamp, price field, lag, and cost model.
+
+## 6. Walk-forward validation
+
+A model that estimates a seasonal mean, threshold, lookback, hedge ratio, or volatility target has parameters. The parameters must be selected using a training set and evaluated on a later test set. A simple fixed-window walk-forward scheme is:
+
+$$
+\begin{aligned}
+\text{train}_j &= [t_j-L,\ t_j),\\
+\text{test}_j &= [t_j,\ t_j+H).
+\end{aligned}
+$$
+
+The half-open interval notation matters: the observation at $t_j$ is not part of the training window if it is used to make the first test decision. After the test window is complete, the origin can advance and the model can be refit.
+
+```{python}
+splits = walk_forward_splits(
+    len(basis),
+    train_size=60,
+    test_size=20,
+    step=20,
+)
+pd.DataFrame(
+    [
+        {
+            "split": i,
+            "train_start": train[0],
+            "train_end_exclusive": train[-1] + 1,
+            "test_start": test[0],
+            "test_end_exclusive": test[-1] + 1,
+        }
+        for i, (train, test) in enumerate(splits)
+    ]
+)
+```
+
+This utility returns index ranges; it does not fit a model for you. That is intentional. The researcher must decide which transformations are fitted, which parameters are fixed, how missing observations are handled, and whether the test period is truly untouched.
+
+For horizons longer than one period, observations may overlap. A five-day forward return computed each day shares four days with its neighbors, so naive standard errors and independent-observation assumptions are wrong. Possible controls include non-overlapping sampling, explicit horizon-aware inference, purging observations near the train/test boundary, and an embargo after training data. These are statistical controls, not cosmetic backtest settings.
+
+## 7. Performance is a distribution, not a single ratio
+
+For a return series $\{r_t\}$, a zero-risk-rate annualized Sharpe ratio is commonly reported as
+
+$$
+\widehat{SR} = \sqrt{A}\frac{\bar r}{s_r},
+$$
+
+where $A$ is the number of periods per year. It is useful but incomplete. At minimum, report:
+
+- total and annualized return;
+- annualized volatility;
+- Sharpe or another clearly defined risk-adjusted return;
+- hit rate and payoff asymmetry;
+- turnover and explicit costs;
+- maximum drawdown and recovery behavior;
+- capacity, liquidity, and margin assumptions;
+- sample period, number of observations, and out-of-sample fraction.
+
+```{python}
+performance_summary(
+    backtest["net_pnl"],
+    periods_per_year=252,
+)
+```
+
+The summary above is an accounting of the synthetic fixture. It is not evidence for a basis strategy. A strategy with a high Sharpe may still be unattractive if it is capacity constrained, exposed to one crop year, dependent on an unrealistic close price, or selected after many unreported trials.
+
+Attribution should connect returns to the mechanism. For a basis signal, useful partitions include:
+
+- crop-calendar bucket;
+- basis level and basis change at entry;
+- report versus non-report days;
+- contract pair and time to delivery;
+- gross return, turnover cost, and residual slippage;
+- signal direction, position size, and volatility regime.
+
+If the P&L cannot be explained in these dimensions, the signal is not yet ready for portfolio allocation.
+
+## 8. Research failure modes
+
+The following failures are especially common in agricultural quantitative research:
+
+1. **Seasonal leakage:** estimating a bucket mean with observations that were not available at the historical decision date.
+2. **Calendar mismatch:** pooling crop-year and delivery-month observations that do not represent the same physical mechanism.
+3. **Basis confusion:** treating a cash basis level as if it were a futures return or a universal scarcity measure.
+4. **Signal/position confusion:** using the score itself as if it were an executable position.
+5. **Same-close execution:** trading at the price used to calculate the signal without a documented execution convention.
+6. **Cost omission:** evaluating gross P&L while presenting it as investable net performance.
+7. **Test-set tuning:** changing thresholds, windows, or exclusions after seeing out-of-sample results.
+8. **Overlapping observations:** treating multi-day forward returns as independent daily data.
+9. **Multiple testing:** selecting the best-looking crop, contract pair, season, and parameter combination without accounting for the search.
+10. **Mechanism drift:** continuing to call a strategy “fundamental” after its realized P&L is driven by an unexamined level, momentum, or liquidity exposure.
+
+A professional research note should be able to state which of these are controlled, which remain open, and how the residual uncertainty affects portfolio use.
+
+## Review checkpoint
+
+You should be able to answer these without looking at the code:
+
+1. Why is a full-sample seasonal z-score unsuitable as a historical trading signal?
+2. What is the difference between a basis level and a basis change?
+3. Why is a signal not the same object as a target position?
+4. Derive the turnover-cost term in the net P&L equation.
+5. What information may be used to fit a model at the beginning of a walk-forward test window?
+6. Why can overlapping forward returns invalidate simple standard errors?
+7. Which performance statistics would you require before comparing a basis signal with an outright futures signal?
+8. Give an example of mechanism drift in an agricultural strategy.
+
+## Focused reading
+
+- Geman, *Commodities and Commodity Derivatives*, for commodity seasonality, forward curves, basis, and the distinction between physical economics and derivative returns [@geman2005].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for commodity futures return decomposition, systematic strategies, and portfolio implementation [@fabozzi2008].
+- Borovkova and Geman in *Risk Management in Commodity Markets*, for curve factors, seasonal structure, and risk-aware commodity modelling [@geman2008risk].
+- Working, “The Theory of the Price of Storage,” for the economic interpretation of storage-related spreads [@working1949].
+
+The next module will introduce stochastic price models and volatility measurement, creating the bridge to options, implied volatility, and nonlinear portfolio risk.
