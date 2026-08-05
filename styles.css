@@ -1,0 +1,4 @@
+/* Module titles already carry the book’s pedagogical numbering. */
+.chapter-number {
+  display: none;
+}

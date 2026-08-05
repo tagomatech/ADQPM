@@ -1,6 +1,7 @@
 project:
   type: book
   output-dir: _site
+  post-render: node scripts/static_math.cjs
 
 book:
   title: "Agriculture Derivatives & Quantitative Portfolio Management"
@@ -17,9 +18,10 @@ format:
   html:
     theme: cosmo
     toc: true
-    number-sections: true
+    number-sections: false
     code-fold: show
     code-tools: true
+    css: styles.css
     html-math-method:
       method: katex
       url: assets/katex/

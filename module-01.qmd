@@ -17,13 +17,12 @@ if SRC.exists() and str(SRC) not in sys.path:
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from agpm.futures import (
     CORN,
     add_calendar_spread,
     annualized_log_spread_slope,
-    annualized_spread_slope,
+
     contract_pnl,
     curve_snapshot,
     long_roll_return,
@@ -63,13 +62,7 @@ Let $F_{i,t}$ denote the settlement price of contract $i$ on exchange date $t$. 
 | $q_{i,t}$ | Signed position carried over the interval | Determines direction and size |
 | $\ell_i$ | Last trading date | Determines when the exchange contract ceases to trade |
 
-For standard CBOT Corn futures, one contract represents $5{,}000$ bushels and the minimum fluctuation is one quarter of one cent per bushel, or 12.50 dollars per contract [@cmeCorn]. The contract specification is a risk input, not a presentation detail.
-
-The local representation makes this explicit:
-
-```{python}
-CORN
-```
+For standard CBOT Corn futures, one contract represents $5{,}000$ bushels and the minimum fluctuation is one quarter of one cent per bushel, or 12.50 dollars per contract [@cmeCorn]. The contract specification is a risk input, not a presentation detail. The framework stores these fields in an immutable contract specification. A printed object representation is infrastructure, not a pricing lesson, so the executable examples below focus on unit conversion and portfolio reconciliation.
 
 A continuous ticker such as `C 1 Comdty` is useful for visualization and monitoring, but it is not a contract. Research data should retain the individual contracts, for example `C U6 Comdty` and `C Z6 Comdty`, and derive any continuous series only as a documented transformation.
 
@@ -93,20 +86,7 @@ V_{\mathrm{tick}} = M\delta
 = 12.50\ \mathrm{USD\ per\ contract}.
 $$
 
-A 7-cent move in one long contract therefore produces 350 dollars before fees and slippage:
-
-```{python}
-price_change = 0.07
-pd.DataFrame(
-    {
-        "price_change_USD_per_bushel": [price_change],
-        "contracts": [1],
-        "multiplier_bushels": [CORN.multiplier],
-        "pnl_USD": [contract_pnl(price_change)],
-        "ticks": [price_change / CORN.tick_size],
-    }
-)
-```
+A 7-cent move in one long contract therefore produces 350 dollars before fees and slippage. This calculation is intentionally left as an accounting identity and review problem; a code cell that merely repeats the multiplication would add no research content.
 
 This is not the same as a percentage return on capital. Futures require margin rather than full notional funding, so a desk will monitor at least three different scales:
 
@@ -142,21 +122,9 @@ $$
 
 The sign convention is operationally important. If December rises by 5 cents while September rises by 3 cents, the December-minus-September spread widens by 2 cents and a long spread earns 100 dollars per contract pair. If the nearby leg rises more rapidly, the same position loses money.
 
-```{python}
-spread_example = pd.DataFrame(
-    {
-        "nearby": [4.50, 4.52],
-        "deferred": [4.62, 4.67],
-    }
-)
-add_calendar_spread(
-    spread_example,
-    nearby="nearby",
-    deferred="deferred",
-)[["nearby", "deferred", "spread", "spread_pnl"]]
-```
+A spread removes much of the common level exposure, but it is not risk-free or automatically dollar-neutral in a broader portfolio. The integrated panel in Section 8 independently computes both leg P&Ls and the spread P&L, then checks the identity. That reconciliation is more useful than a two-row display because it exposes the assumptions under which the compact spread formula is valid.
 
-A spread removes much of the common level exposure, but it is not risk-free or automatically dollar-neutral in a broader portfolio. Important residuals include:
+Important residuals include:
 
 - different liquidity and execution conditions in the two legs;
 - delivery-location, grade, and basis differences;
@@ -190,7 +158,7 @@ The important economic interpretation is:
 
 This is the central caution in the theory of storage: the curve is simultaneously a market price, a physical allocation signal, and a risk-premium-bearing financial object [@working1949; @kaldor1939; @geman2005]. A desk may use the curve to infer the state of inventory scarcity, but it must not call the raw slope “carry” without defining the financing, storage, quality, location, and delivery assumptions.
 
-For adjacent contracts, the implementation reports both simple and logarithmic annualized curve measures:
+For adjacent contracts, a curve panel should expose both an absolute and a relative slope. The absolute slope is quoted in dollars per bushel per year; the logarithmic slope is a continuously compounded price-ratio rate. The following cell computes both for every adjacent pair and labels the observable curve state. This is the useful role of code here: it makes the transformation from a dated price panel to a candidate curve-state feature auditable.
 
 ```{python}
 curve = pd.DataFrame(
@@ -203,38 +171,38 @@ curve = pd.DataFrame(
     }
 )
 
-curve_snapshot(curve, price="price", delivery="delivery")
-```
+diagnostics = curve_snapshot(curve, price="price", delivery="delivery")
+diagnostics["log_slope"] = np.nan
+for i in range(len(diagnostics) - 1):
+    diagnostics.loc[i, "log_slope"] = annualized_log_spread_slope(
+        deferred_price=diagnostics.loc[i + 1, "price"],
+        nearby_price=diagnostics.loc[i, "price"],
+        deferred_delivery=diagnostics.loc[i + 1, "delivery"],
+        nearby_delivery=diagnostics.loc[i, "delivery"],
+    )
 
-```{python}
-nearby_price = curve.loc[0, "price"]
-deferred_price = curve.loc[1, "price"]
-nearby_delivery = curve.loc[0, "delivery"]
-deferred_delivery = curve.loc[1, "delivery"]
-
-pd.DataFrame(
-    {
-        "simple_slope_USD_per_bushel_per_year": [
-            annualized_spread_slope(
-                deferred_price=deferred_price,
-                nearby_price=nearby_price,
-                deferred_delivery=deferred_delivery,
-                nearby_delivery=nearby_delivery,
-            )
-        ],
-        "log_slope_per_year": [
-            annualized_log_spread_slope(
-                deferred_price=deferred_price,
-                nearby_price=nearby_price,
-                deferred_delivery=deferred_delivery,
-                nearby_delivery=nearby_delivery,
-            )
-        ],
-    }
+diagnostics["curve_state"] = np.select(
+    [
+        diagnostics["next_spread"] > 0,
+        diagnostics["next_spread"] < 0,
+    ],
+    ["contango", "backwardation"],
+    default="terminal",
 )
+diagnostics[
+    [
+        "contract",
+        "next_spread",
+        "days_to_next",
+        "annualized_slope",
+        "log_slope",
+        "curve_state",
+    ]
+]
 ```
 
-The simple slope is easier to communicate in dollars per bushel per year. The logarithmic slope is more comparable across price levels and is closer to a continuously compounded carry measure. Neither one isolates convenience yield from the other components.
+The output makes the mapping explicit: next_spread is a price difference, annualized_slope divides it by the actual calendar interval, and log_slope uses a price ratio. These are descriptive curve measures. To call one “net carry” or to infer convenience yield requires additional assumptions about spot, financing, storage, insurance, quality, location, and delivery. The code does not hide those unknowns.
+
 
 ## 5. Outright return, spread return, and roll return
 
@@ -253,20 +221,7 @@ $$
 
 Under this convention, rolling a long position from a cheaper nearby contract into a more expensive deferred contract produces a negative roll return. The convention must be stated because alternative index methodologies normalize the roll leg differently.
 
-```{python}
-roll = pd.DataFrame(
-    {
-        "old_nearby": [4.50, 4.60],
-        "new_deferred": [4.62, 4.55],
-    }
-)
-roll["long_roll_return"] = long_roll_return(
-    roll["old_nearby"], roll["new_deferred"]
-)
-roll
-```
-
-A continuous futures index is therefore a constructed strategy, not a primitive market observation. Its historical return depends on contract selection, roll schedule, weighting, price field, transaction costs, and treatment of the roll. This is why a signal found on a continuous series must be reconstructed on the actual contract set before it is considered tradable.
+A continuous futures index is therefore a constructed strategy, not a primitive market observation. Its historical return depends on contract selection, roll schedule, weighting, price field, transaction costs, and treatment of the roll. This is why a signal found on a continuous series must be reconstructed on the actual contract set before it is considered tradable. The roll diagnostic is therefore not shown as an isolated code cell; it reappears in Section 8 next to identified-contract and spread returns, where the comparison has economic meaning.
 
 ## 6. The forward curve as a factor object
 
@@ -317,9 +272,16 @@ A defensible research panel therefore stores at least:
 - missing-data and holiday treatment;
 - the transformation from raw data to signal.
 
-## 8. A deterministic contract and curve example
+## 8. Integrated contract-panel fixture: leg P&L, spread, and roll diagnostics
 
-The following fixture is deliberately small. It verifies arithmetic and sign conventions; it is not evidence of a market effect.
+The following fixture is deliberately small. It is not evidence of a market effect. Its purpose is to reconcile several return objects on the same identified contract panel:
+
+- outright return on the nearby contract;
+- P&L on the short-nearby/long-deferred spread;
+- independent leg-level P&L;
+- the long roll diagnostic.
+
+The identity error is a test, not a decorative output. If it is non-zero, the panel has a sign, multiplier, timestamp, or leg-definition problem.
 
 ```{python}
 example = pd.DataFrame(
@@ -336,29 +298,37 @@ example = add_calendar_spread(
     deferred="deferred",
     multiplier=CORN.multiplier,
 )
+example["nearby_contract_return"] = example["nearby"].pct_change(fill_method=None)
+example["nearby_leg_pnl"] = contract_pnl(
+    example["nearby"].diff(), multiplier=CORN.multiplier, side=-1
+)
+example["deferred_leg_pnl"] = contract_pnl(
+    example["deferred"].diff(), multiplier=CORN.multiplier, side=1
+)
+example["leg_pnl"] = example["nearby_leg_pnl"] + example["deferred_leg_pnl"]
+example["identity_error"] = example["leg_pnl"] - example["spread_pnl"]
 example["long_roll_return_nearby_to_deferred"] = long_roll_return(
     example["nearby"], example["deferred"]
 )
-example[[
-    "date", "nearby", "deferred", "spread", "spread_pnl",
-    "long_roll_return_nearby_to_deferred",
-]]
+
+assert np.allclose(example["identity_error"].dropna(), 0.0)
+
+example[
+    [
+        "date",
+        "nearby",
+        "deferred",
+        "nearby_contract_return",
+        "spread",
+        "spread_pnl",
+        "leg_pnl",
+        "identity_error",
+        "long_roll_return_nearby_to_deferred",
+    ]
+]
 ```
 
-```{python}
-fig, ax = plt.subplots(figsize=(9, 4))
-ax.plot(example["date"], example["nearby"], label="Nearby")
-ax.plot(example["date"], example["deferred"], label="Deferred")
-ax.set_ylabel("USD/bushel")
-ax.set_title("Illustrative corn futures curve legs")
-ax.legend()
-ax.grid(alpha=0.25)
-fig.autofmt_xdate()
-plt.show()
-```
-
-The spread P&L is the mark-to-market result of one long deferred / short nearby spread. It excludes commissions, bid/ask costs, slippage, margin financing, and execution mismatch. The roll-return column is a separate price-ratio diagnostic; it is not the P&L of the spread position.
-
+The spread P&L identity holds here because both legs are synchronized, use the same multiplier, and are marked on the same dates. In a production panel, the reconciliation must also document settlement versus executable prices, leg-specific costs, contract rolls, limit events, and missing observations. The roll-return column remains a price-ratio diagnostic; it is not the P&L of the spread position.
 ## 9. Seasonal adjustment and research hypothesis
 
 A standardized spread statistic can be useful for visualization, but it is not yet a strategy. For a spread observation $S_t$, estimate its location and scale separately for crop-calendar bucket $m$ and contract pair $c$. The resulting crop-calendar-adjusted, seasonally standardized diagnostic is
