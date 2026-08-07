@@ -96,7 +96,7 @@ The calculation is deliberately boring. A balance-sheet function should not fore
 
 All terms must use the same unit and period. Mixing bushels with metric tonnes, crop years with calendar years, or a revised production estimate with an unrevised use estimate can create a numerically precise but economically meaningless feature. Unit conversions belong in a documented data layer; the balance function should receive normalized inputs.
 
-## 2. Stocks-to-use is a state descriptor, not a price forecast
+## 2. Stocks-to-use is a state descriptor—not a complete price forecast
 
 Define total use as
 
@@ -110,7 +110,43 @@ $$
 R_t = \frac{S^{E}_t}{T_t}.
 $$
 
-The ratio is dimensionless and allows scale comparison across years. It is often a useful scarcity proxy because a given inventory level is more consequential when expected use is large. It is not, however, a universal structural measure of convenience yield. Quality, location, deliverability, inventory ownership, financing, and expectations all matter.
+The ratio is dimensionless and allows scale comparison across years. It is often a useful scarcity proxy—and a common explanatory variable in agricultural price models—because a given inventory level is more consequential when expected use is large. It is not, however, a universal structural measure of convenience yield. Quality, location, deliverability, inventory ownership, financing, and expectations all matter.
+
+::: {.callout-note}
+## Theory and practice: why practitioners regress price on stocks-to-use
+
+The heading needs a precise qualification. In agricultural markets, practitioners and public institutions do use stocks-to-use relationships to construct conditional price benchmarks. USDA Economic Research Service price models for corn and wheat explicitly use a stocks-to-use framework for price determination and forecasting, while published agricultural-market research has used rolling and report-specific regressions of futures prices on projected stocks-to-use [@westcottHoffman1999; @milacekBrorsen2017]. The practice is therefore consistent with the theory; it answers a different question from a no-arbitrage storage relation.
+
+The theory says that inventory scarcity affects the value of immediate physical availability. In the theory of storage, that scarcity service is represented by convenience yield, which can influence the spot price, nearby basis, and forward curve. Stocks-to-use is an observable, compressed proxy for part of that state. Theory explains why the relationship should often be negative—lower available stocks relative to use tend to be associated with higher prices—but it does not determine the functional form, coefficient, horizon, contract month, risk premium, or regime.
+
+A practitioner fair-value model makes those empirical choices explicit. A stylized version is
+
+$$
+\widehat{\log P^{\mathrm{FV}}_{y,h|v}}
+= \alpha_{m,h}
++ \beta_h \log R_{y|v}
++ \boldsymbol{\gamma}_h^{\mathsf{T}}\mathbf{Z}_{y|v},
+\qquad \beta_h<0,
+$$
+
+where $y$ is a crop or marketing year, $h$ is the price horizon or contract target, $v$ is the information vintage, $R_{y|v}$ is the stocks-to-use forecast available at that vintage, and $\mathbf{Z}_{y|v}$ contains controls such as seasonality, policy, global supply, exchange rates, energy inputs, expected production and use, or cross-commodity relationships. The target $P$ might be a season-average farm price, a nearby futures price after a report, or a specified delivery-month futures price. These are not interchangeable targets.
+
+The model-implied value is a **conditional benchmark**, not an arbitrage-free price. It estimates what the selected price object has tended to be, conditional on a selected information set and sample. A residual,
+
+$$
+e_{t,h}=\log P_{t,h}-\widehat{\log P^{\mathrm{FV}}_{t,h|v}},
+$$
+
+can be used as a relative-value or forecasting feature only if there is a defensible mechanism for convergence, a defined horizon, and adequate compensation for carry, basis, liquidity, model uncertainty, and trading costs. A large residual may instead indicate a structural break, a poor contract mapping, a new policy regime, or an omitted risk premium.
+
+| Layer | Main question | What it does not provide |
+|:--|:--|:--|
+| Theory of storage | How can inventory scarcity affect spot, basis, and the curve? | A unique price from stocks-to-use alone |
+| Fair-value regression | What price is conditionally consistent with the chosen historical model and information vintage? | An arbitrage guarantee or a tradable return |
+| Portfolio signal | Is the residual expected to close at a known horizon after carry and costs? | Certainty that the model will mean-revert |
+
+The implementation boundary matters. The current code computes and audits the ratio; it does not fit a three-row “fair-value” regression. A useful implementation requires a historical vintage panel, a precisely defined price target, walk-forward estimation, uncertainty estimates, and a contract-level mapping. Those requirements are why the regression belongs in the research layer rather than being presented as a decorative extension of the accounting calculation.
+:::
 
 ```{python}
 balance["total_use_m_bushels"] = (
@@ -125,7 +161,7 @@ balance["stocks_to_use"] = stocks_to_use(
 balance[["marketing_year", "ending_stocks_m_bushels", "total_use_m_bushels", "stocks_to_use"]]
 ```
 
-The economic interpretation must be conditional. A low ratio can coincide with backwardation, a stronger nearby basis, and high implied volatility, but it can also coexist with a weak price if demand is being revised down or if the scarcity is already reflected in the curve. A balance-sheet feature should therefore be compared with the contemporaneous futures curve, basis, volatility, and market expectation—not treated as an isolated directional signal.
+The economic interpretation must be conditional. A low ratio can coincide with backwardation, a stronger nearby basis, and high implied volatility, but it can also coexist with a weak price if demand is being revised down or if the scarcity is already reflected in the curve. In a practitioner model, the relevant question is whether the ratio implies a price different from the current price after conditioning on the contemporaneous futures curve, basis, volatility, market expectation, and model regime—not whether the ratio has a universal directional sign.
 
 A simple visualization is useful for inspecting the state space, but it is not evidence of a stable relation:
 
@@ -327,12 +363,16 @@ You should be able to answer these without looking at the code:
 6. Give two reasons why a basis model can be valuable even if outright futures returns are difficult to forecast.
 7. What changes when a physical signal is mapped to a calendar spread instead of an outright contract?
 8. Which part of the table above is an economic assumption rather than an accounting identity?
+9. Why can a regression of price on stocks-to-use be useful without being an arbitrage-free valuation equation?
+10. Which price target, information vintage, controls, and convergence mechanism would be required before trading a stocks-to-use residual?
 
 ## Focused reading
 
 - Geman, *Commodities and Commodity Derivatives*, Chapters 1–3, for storage, convenience yield, and the relationship between physical availability and derivative prices [@geman2005].
 - Working, “The Theory of the Price of Storage,” for the economics of storage and the interpretation of futures spreads [@working1949].
 - Borovkova and Geman in *Risk Management in Commodity Markets*, Chapter 2, for curve factors, seasonality, and commodity-specific modelling [@geman2008risk].
+- USDA Economic Research Service, *Price Determination for Corn and Wheat*, for an institutional stocks-to-use price-response framework and its limitations [@westcottHoffman1999].
+- Milacek and Brorsen, “Trading Based on Knowing the WASDE Report in Advance,” for report-specific futures-price regressions, structural change, and the gap between a price forecast and a tradable return [@milacekBrorsen2017].
 - USDA WASDE documentation for the structure and release timing of agricultural balance estimates [@usdaWasde].
 - CFTC COT documentation for report timing, positioning categories, and the distinction between reportable derivatives positions and the physical market [@cftcCot].
 

@@ -20,6 +20,7 @@ This is a working source map rather than a reading list to complete before study
 
 - CME Group, Corn futures product overview: contract size, quotation convention, tick size, and contract mechanics [@cmeCorn].
 - CME Group, Variable Storage Rates and FAQ: the exchange-specific storage-charge rule, financial full carry, calendar-spread triggers, and cash–futures convergence in physically delivered wheat [@cmeVsr; @cmeVsrFaq].
+- Milacek and Brorsen, “Trading Based on Knowing the WASDE Report in Advance”: an empirical example of report-specific stocks-to-use price forecasting and trading evaluation [@milacekBrorsen2017].
 - USDA, WASDE documentation: publication context for supply-and-use estimates and revisions [@usdaWasde].
 - U.S. CFTC, Commitments of Traders reports: report timing, categories, and position data conventions [@cftcCot].
 
