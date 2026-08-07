@@ -183,12 +183,15 @@ where $r$ is financing, $c$ is storage and insurance cost, and $y$ is convenienc
 A useful conceptual decomposition is:
 
 $$
-\text{observed deferred-nearby price difference}
-= \text{financing} + \text{storage} - \text{scarcity service}
-+ \text{risk premium} + \text{measurement error}.
+\begin{aligned}
+\underbrace{F_d-F_n}_{\text{observed spread}}
+&\approx \text{financing}+\text{storage}\\
+&\quad-\text{scarcity service}+\text{risk premium}\\
+&\quad+\text{measurement error}.
+\end{aligned}
 $$
 
-This is not an identity with directly observable components. It is a research map. Storage costs may be nonlinear; inventories may be unavailable to the marginal buyer; the cash price may contain location and quality premia; and the risk premium can vary through time. A regression of a spread on stocks-to-use should therefore be interpreted as a reduced-form relation whose stability must be tested across crop years and regimes.
+Here $F_n$ and $F_d$ denote the nearby and deferred futures prices for the selected pair. The approximation sign is deliberate: only the left-hand spread is directly observed; the right-hand components are a research map, not separately identified accounting terms. Storage costs may be nonlinear; inventories may be unavailable to the marginal buyer; the cash price may contain location and quality premia; and the risk premium can vary through time. A regression of a spread on stocks-to-use should therefore be interpreted as a reduced-form relation whose stability must be tested across crop years and regimes.
 
 The practical object is a joint panel. At each decision timestamp, preserve the physical vintage, the futures contracts, the delivery dates, the local cash price, and the market expectation that was observable at that time. Only then can the curve be used to ask whether a fundamental change was already priced.
 
