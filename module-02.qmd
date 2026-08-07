@@ -1,5 +1,5 @@
 ---
-title: "Module 2 — Physical balances, basis, and information timing"
+title: "Chapter 2 — Physical balances, basis, and information timing"
 description: "From agricultural balance sheets to point-in-time tradable hypotheses."
 ---
 
@@ -15,13 +15,13 @@ import pandas as pd
 
 ```
 
-## Scope and learning contract
+## Chapter purpose and learning outcomes
 
-Module 1 defined the dated derivative and the curve. This module adds the physical state variables that make agricultural markets different from generic financial futures: production, stocks, use, exports, basis, crop calendars, and public information releases.
+Chapter 1 defined the dated derivative and the curve. This chapter adds the physical state variables that make agricultural markets different from generic financial futures: production, stocks, use, exports, basis, crop calendars, and public information releases.
 
 The central distinction is between an accounting identity and an economic model. A balance sheet must add up. A low stocks-to-use ratio may be informative about scarcity. Neither fact, by itself, specifies the next futures return. The quantitative task is to construct a point-in-time state estimate, map it to a tradable price object, and evaluate the mapping without using revised or subsequently released information.
 
-By the end of the module, you should be able to:
+By the end of this chapter, you should be able to:
 
 1. construct and audit a crop-year balance sheet in consistent physical units;
 2. distinguish stocks, flows, forecasts, revisions, and vintages;
@@ -172,7 +172,7 @@ The natural research comparison is often not the level of $R_t$ but its change, 
 
 ## 3. Physical state and the forward curve
 
-Module 1 introduced the stylized storage relation
+Chapter 1 introduced the stylized storage relation
 
 $$
 F(t,T) = S_t\exp\left((r+c-y)(T-t)\right),
@@ -214,7 +214,7 @@ The final net price depends on the basis at the time the physical sale is made. 
 
 This is why a successful futures directional forecast is not necessarily a successful physical hedge, and why a basis model can add value even when the futures level is difficult to forecast. The relevant risk is often the change in basis, together with contract mismatch, location, grade, timing, liquidity, and execution costs.
 
-The VSR example in Module 1 is a useful reminder that basis and convergence cannot always be analysed independently of exchange design. In deliverable wheat, a rule governing certificate storage charges can move part of the convergence economics into calendar spreads. A basis model should therefore retain the applicable delivery rule, contract month, grade, location, and observation window as state variables rather than treating convergence as a purely statistical tendency.
+The VSR example in Chapter 1 is a useful reminder that basis and convergence cannot always be analysed independently of exchange design. In deliverable wheat, a rule governing certificate storage charges can move part of the convergence economics into calendar spreads. A basis model should therefore retain the applicable delivery rule, contract month, grade, location, and observation window as state variables rather than treating convergence as a purely statistical tendency.
 
 ```{python}
 hedge = pd.DataFrame(
@@ -373,4 +373,4 @@ You should be able to answer these without looking at the code:
 - USDA WASDE documentation for the structure and release timing of agricultural balance estimates [@usdaWasde].
 - CFTC COT documentation for report timing, positioning categories, and the distinction between reportable derivatives positions and the physical market [@cftcCot].
 
-The next module will use these physical and information-set objects to study agricultural seasonality, basis dynamics, and robust signal construction before moving to options and volatility.
+The next chapter will use these physical and information-set objects to study agricultural seasonality, basis dynamics, and robust signal construction before moving to options and volatility.

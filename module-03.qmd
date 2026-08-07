@@ -1,5 +1,5 @@
 ---
-title: "Module 3 — Seasonality, basis dynamics, and signal validation"
+title: "Chapter 3 — Seasonality, basis dynamics, and signal validation"
 description: "How agricultural observations become point-in-time, cost-aware, and falsifiable trading signals."
 ---
 
@@ -15,9 +15,9 @@ import pandas as pd
 
 ```
 
-## Scope and learning contract
+## Chapter purpose and learning outcomes
 
-Module 2 introduced physical balances, basis, report surprises, and point-in-time data. This module addresses the next research problem: how to transform those observations into a signal without mistaking a seasonal average, a revised number, or a backtest artefact for an exploitable return.
+Chapter 2 introduced physical balances, basis, report surprises, and point-in-time data. This chapter addresses the next research problem: how to transform those observations into a signal without mistaking a seasonal average, a revised number, or a backtest artefact for an exploitable return.
 
 The unit of analysis is a complete research chain:
 
@@ -37,7 +37,7 @@ $$
 
 A signal is not a chart and a backtest is not a proof. The purpose of the framework is to make every transformation, timestamp, unit, cost, and failure mode visible.
 
-By the end of the module, you should be able to:
+By the end of this chapter, you should be able to:
 
 1. distinguish deterministic calendar structure from a conditional seasonal signal;
 2. standardize an observation using only information available before the decision;
@@ -381,4 +381,4 @@ You should be able to answer these without looking at the code:
 - Borovkova and Geman in *Risk Management in Commodity Markets*, for curve factors, seasonal structure, and risk-aware commodity modelling [@geman2008risk].
 - Working, “The Theory of the Price of Storage,” for the economic interpretation of storage-related spreads [@working1949].
 
-The next module will introduce stochastic price models and volatility measurement, creating the bridge to options, implied volatility, and nonlinear portfolio risk.
+The next chapter will introduce stochastic price models and volatility measurement, creating the bridge to options, implied volatility, and nonlinear portfolio risk.

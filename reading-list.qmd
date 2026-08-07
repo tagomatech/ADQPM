@@ -11,6 +11,11 @@ This is a working source map rather than a reading list to complete before study
 - Working, “The Theory of the Price of Storage”: the inventory and convenience-yield logic underlying the theory of storage [@working1949].
 - Kaldor, “Speculation and Economic Stability”: the classic discussion of normal backwardation, inventories, and speculative markets [@kaldor1939].
 
+## Stochastic dynamics and derivative valuation {.unnumbered}
+
+- Gibson and Schwartz, “Stochastic Convenience Yield and the Pricing of Oil Contingent Claims”: a two-factor pricing model linking spot and convenience yield [@gibsonSchwartz1990].
+- Schwartz, “The Stochastic Behavior of Commodity Prices: Implications for Valuation and Hedging”: nested one-, two-, and three-factor models and their valuation and hedge implications [@schwartz1997].
+- Schwartz and Smith, “Short-Term Variations and Long-Term Dynamics in Commodity Prices”: a long-term level/short-term deviation model expressed directly through the futures curve [@schwartzSmith2000].
 ## Risk, curves, and portfolio management {.unnumbered}
 
 - Geman (ed.), *Risk Management in Commodity Markets*: forward-curve modelling, physical/financial risk integration, portfolio hedging, structural breaks, and commodity-derivatives risk management [@geman2008risk].
