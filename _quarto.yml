@@ -12,6 +12,7 @@ book:
     - module-02.qmd
     - module-03.qmd
     - module-04.qmd
+    - module-05.qmd
     - reading-list.qmd
 
 format:

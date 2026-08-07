@@ -21,6 +21,10 @@ This is a working source map rather than a reading list to complete before study
 - Geman (ed.), *Risk Management in Commodity Markets*: forward-curve modelling, physical/financial risk integration, portfolio hedging, structural breaks, and commodity-derivatives risk management [@geman2008risk].
 - Fabozzi, Füss, and Kaiser (eds.), *The Handbook of Commodity Investing*: futures economics, performance measurement, portfolio risk, forecasting, systematic strategies, options, and agricultural fundamentals [@fabozzi2008].
 
+## Options and volatility {.unnumbered}
+
+- Black, “The Pricing of Commodity Contracts”: the benchmark futures-option valuation formula and its assumptions [@black1976].
+- Geman, *Commodities and Commodity Derivatives*, the chapters on option valuation, volatility, and spread options [@geman2005].
 ## Market and data conventions {.unnumbered}
 
 - CME Group, Corn futures product overview: contract size, quotation convention, tick size, and contract mechanics [@cmeCorn].

@@ -1,0 +1,499 @@
+---
+title: "Chapter 5 — Options, implied volatility, and nonlinear agricultural risk"
+description: "Black–76, Greeks, volatility surfaces, and the translation from option marks to hedgeable portfolio risk."
+---
+
+```{python}
+#| label: ch5-setup
+#| echo: false
+
+from math import erf, exp, log, pi, sqrt
+
+import numpy as np
+import pandas as pd
+```
+
+## Chapter question and learning outcomes
+
+Chapter 4 supplied a stochastic language for futures curves. This chapter adds the nonlinear layer:
+
+> How should an agricultural option be priced, marked, hedged, and evaluated when the underlying is a futures contract whose volatility is seasonal, maturity-specific, and exposed to discrete physical information?
+
+The focus is not a survey of option terminology. It is the minimum professional framework needed to reason about an agricultural option book:
+
+1. the traded payoff and the futures-versus-spot distinction;
+2. Black–76 as a benchmark and its assumptions;
+3. Greeks as local risk sensitivities with explicit units;
+4. implied volatility as an inverse-pricing coordinate;
+5. volatility surfaces, smile, skew, and no-arbitrage controls;
+6. delta, gamma, vega, and event-risk management;
+7. the separation of implied risk, realized risk, and risk premia.
+
+The examples use prices per bushel and then convert to one CBOT Corn contract of 5,000 bushels. The numbers are deterministic teaching fixtures, not market marks or trading recommendations.
+
+## 1. The option is written on a futures contract
+
+Let $F_t$ be the price of the relevant futures contract at time $t$, $K$ the option strike, $T$ the option expiry, and $\tau=T-t$. A call on the futures contract has terminal payoff per physical unit
+
+$$
+C_T^{\mathrm{unit}}=\max(F_T-K,0),
+$$
+
+and a put has payoff
+
+$$
+P_T^{\mathrm{unit}}=\max(K-F_T,0).
+$$
+
+For a contract multiplier $M$, the exchange-level payoff is $M$ times the unit payoff. The option premium is also quoted per physical unit in many agricultural markets, so the contract premium is $M$ times the quoted premium. That unit conversion is part of the risk calculation, not a display convention.
+
+An option on futures is not an option on spot. Exercise normally creates a position in the underlying futures contract according to the exchange’s contract rules; the resulting futures position then has its own daily mark-to-market, delivery, and liquidation conventions. The exercise style, last trade date, futures delivery month, and option expiry must be stored explicitly. They cannot be inferred safely from a generic “maturity” field.
+
+Under deterministic interest rates, the futures option benchmark uses the futures price directly. The Black–76 call and put prices per unit are
+
+$$
+\begin{aligned}
+C_t &=e^{-r\tau}\left[F_t\Phi(d_1)-K\Phi(d_2)\right],\\
+P_t &=e^{-r\tau}\left[K\Phi(-d_2)-F_t\Phi(-d_1)\right],\\
+d_1 &=\frac{\log(F_t/K)+\tfrac{1}{2}\sigma^2\tau}
+{\sigma\sqrt{\tau}},\\
+d_2 &=d_1-\sigma\sqrt{\tau},
+\end{aligned}
+$$
+
+where $r$ is the continuously compounded discount rate, $\sigma$ is the volatility of the futures return under the pricing model, and $\Phi$ is the standard normal cumulative distribution function [@black1976].
+
+The assumptions are clear and restrictive: lognormal futures dynamics, constant volatility over the option life, deterministic rates, continuous trading in the futures hedge, no jumps, and no bid–ask or margin effects. Black–76 is a benchmark coordinate system. It is not a complete description of corn, wheat, soybean, or biofuel-feedstock option risk.
+
+Put–call parity is
+
+$$
+C_t-P_t=e^{-r\tau}(F_t-K).
+$$
+
+It is a powerful marking and data-quality check. A call and put with the same futures contract, strike, expiry, and settlement convention must be compared only after confirming that they really share those identifiers.
+
+The following calculation makes the unit conversion and parity check explicit.
+
+```{python}
+#| label: ch5-black76-benchmark
+
+F = 4.50                 # USD per bushel
+K = 4.50                 # USD per bushel
+expiry_years = 45 / 365
+rate = 0.04
+volatility = 0.32
+multiplier = 5_000       # bushels per CBOT Corn futures contract
+
+discount = exp(-rate * expiry_years)
+d1 = (
+    log(F / K) + 0.5 * volatility**2 * expiry_years
+) / (volatility * sqrt(expiry_years))
+d2 = d1 - volatility * sqrt(expiry_years)
+
+normal_cdf = lambda x: 0.5 * (1.0 + erf(x / sqrt(2.0)))
+call_unit = discount * (F * normal_cdf(d1) - K * normal_cdf(d2))
+put_unit = discount * (K * normal_cdf(-d2) - F * normal_cdf(-d1))
+
+black76 = pd.DataFrame(
+    {
+        "quantity": ["call", "put", "call minus put"],
+        "premium_per_bushel": [call_unit, put_unit, call_unit - put_unit],
+        "premium_per_contract": [
+            multiplier * call_unit,
+            multiplier * put_unit,
+            multiplier * (call_unit - put_unit),
+        ],
+    }
+)
+black76.loc[2, "parity_reference_per_bushel"] = discount * (F - K)
+black76.round(6)
+```
+
+A premium of a few cents per bushel becomes hundreds of dollars per contract. A portfolio manager should therefore read every Greek in both quoted units and currency units.
+
+## 2. Greeks are local derivatives with units
+
+For a call on a futures price, the principal Black–76 sensitivities per physical unit are
+
+$$
+\begin{aligned}
+\Delta_C
+&=e^{-r\tau}\Phi(d_1),\\
+\Gamma_C
+&=e^{-r\tau}\frac{\phi(d_1)}{F_t\sigma\sqrt{\tau}},\\
+\mathcal{V}_C
+&=e^{-r\tau}F_t\phi(d_1)\sqrt{\tau},
+\end{aligned}
+$$
+
+where $\phi$ is the standard normal density. Put delta follows from parity:
+
+$$
+\Delta_P=e^{-r\tau}\left[\Phi(d_1)-1\right].
+$$
+
+Vega is the value change for a one-unit change in volatility, from $\sigma$ to $\sigma+1.00$. Market quotations usually describe a one-volatility-point change, so the one-point vega is $\mathcal{V}/100$. Gamma is the curvature of option value with respect to a one-unit change in the futures price; it is not “the delta change” without specifying the price increment.
+
+For a small change in the futures price, volatility, and calendar time, the call P&L approximation is
+
+$$
+\Delta V
+\approx
+\Delta_C\,\Delta F
++\frac{1}{2}\Gamma_C(\Delta F)^2
++\mathcal{V}_C\,\Delta\sigma
++\Theta_{\mathrm{clock}}\,\Delta t,
+$$
+
+where $\Delta t>0$ denotes elapsed calendar time and $\Theta_{\mathrm{clock}}=\partial C/\partial t$ holds the current futures price and volatility fixed. For the constant-$F$ Black–76 benchmark,
+
+$$
+\Theta_{\mathrm{clock}}
+=rC_t-e^{-r\tau}F_t\phi(d_1)\frac{\sigma}{2\sqrt{\tau}}.
+$$
+
+The approximation is a risk attribution, not an exact accounting identity. Large futures moves, volatility-surface motion, jumps around reports, and changes in the relevant futures contract make higher-order and mark-convention effects material.
+
+```{python}
+#| label: ch5-greeks
+
+phi_d1 = exp(-0.5 * d1**2) / sqrt(2 * pi)
+delta_call = discount * normal_cdf(d1)
+gamma_call = discount * phi_d1 / (F * volatility * sqrt(expiry_years))
+vega_call = discount * F * phi_d1 * sqrt(expiry_years)
+theta_clock_call = rate * call_unit - discount * F * phi_d1 * volatility / (2 * sqrt(expiry_years))
+
+greeks = pd.DataFrame(
+    {
+        "greek": ["delta", "gamma", "vega per 1.00 vol", "vega per vol point", "clock theta per year"],
+        "per_bushel": [
+            delta_call,
+            gamma_call,
+            vega_call,
+            vega_call / 100,
+            theta_clock_call,
+        ],
+        "per_corn_contract": [
+            multiplier * delta_call,
+            multiplier * gamma_call,
+            multiplier * vega_call,
+            multiplier * vega_call / 100,
+            multiplier * theta_clock_call,
+        ],
+    }
+)
+greeks.round(6)
+```
+
+The contract-level delta is a futures-equivalent quantity. A call with delta $0.50$ on a 5,000-bushel contract has approximately 2,500 bushels of futures-equivalent exposure, before gamma and volatility effects. A hedge must respect the discrete contract size and the fact that the option may create a futures position on exercise.
+
+## 3. Implied volatility is an inverse-pricing coordinate
+
+A market option price $V^{\mathrm{mkt}}$ implies the volatility $\widehat{\sigma}$ that solves
+
+$$
+V^{\mathrm{Black76}}(F,K,\tau,r,\widehat{\sigma})
+=V^{\mathrm{mkt}}.
+$$
+
+There is no closed-form inverse for $\widehat{\sigma}$. The function is increasing in volatility for a non-degenerate option because vega is positive, so a bracketed root search is appropriate. The price must first satisfy no-arbitrage bounds. For a call,
+
+$$
+ e^{-r\tau}\max(F-K,0)
+\le C_t
+\le e^{-r\tau}F,
+$$
+
+and analogous bounds apply to the put. A price outside the bounds usually indicates a bad quote, a wrong option/futures mapping, a settlement-timestamp mismatch, or a unit error—not a spectacular volatility opportunity.
+
+The following bisection routine shows the inverse problem directly. It deliberately uses no hidden numerical library: the objective, bracket, stopping rule, and failure condition are visible.
+
+```{python}
+#| label: ch5-implied-volatility
+
+def black76_call(F, K, expiry_years, rate, volatility):
+    discount = exp(-rate * expiry_years)
+    d1 = (
+        log(F / K) + 0.5 * volatility**2 * expiry_years
+    ) / (volatility * sqrt(expiry_years))
+    d2 = d1 - volatility * sqrt(expiry_years)
+    return discount * (
+        F * normal_cdf(d1) - K * normal_cdf(d2)
+    )
+
+
+def implied_volatility_call(price, F, K, expiry_years, rate):
+    lower_bound = exp(-rate * expiry_years) * max(F - K, 0.0)
+    upper_bound = exp(-rate * expiry_years) * F
+    if not lower_bound <= price <= upper_bound:
+        raise ValueError("Option price violates Black-76 no-arbitrage bounds.")
+    if abs(price - lower_bound) < 1e-12:
+        return 0.0
+
+    lower = 1e-8
+    upper = 1.0
+    while black76_call(F, K, expiry_years, rate, upper) < price:
+        upper *= 2.0
+        if upper > 20.0:
+            raise ValueError("Could not bracket the implied volatility.")
+
+    for _ in range(100):
+        middle = 0.5 * (lower + upper)
+        model_price = black76_call(F, K, expiry_years, rate, middle)
+        if model_price < price:
+            lower = middle
+        else:
+            upper = middle
+    return 0.5 * (lower + upper)
+
+market_call = call_unit
+implied_vol = implied_volatility_call(
+    market_call, F, K, expiry_years, rate
+)
+
+pd.DataFrame(
+    {
+        "market_call_premium_per_bushel": [market_call],
+        "recovered_implied_volatility": [implied_vol],
+        "repricing_error": [
+            black76_call(F, K, expiry_years, rate, implied_vol) - market_call
+        ],
+    }
+).round(8)
+```
+
+Implied volatility is therefore a model-dependent coordinate of an option quote. It is not automatically the market’s expected future volatility. It reflects the pricing measure, volatility risk premium, skew, jump risk, liquidity, and the exact option and futures contract selected.
+
+## 4. A volatility surface is a cross-section, not one number
+
+An option market supplies a surface indexed by strike and expiry,
+
+$$
+\widehat{\sigma}_{\mathrm{imp}}(K,T),
+$$
+
+or, more usefully for modelling, by log-moneyness and total variance,
+
+$$
+ k=\log(K/F_t),
+\qquad
+ w(k,\tau)=\widehat{\sigma}_{\mathrm{imp}}(k,\tau)^2\tau.
+$$
+
+The surface contains several distinct pieces of information:
+
+- **term structure:** how implied variance changes with option expiry;
+- **smile:** curvature across strikes;
+- **skew:** asymmetry across strikes;
+- **event structure:** local variance concentrated around a report, weather window, or delivery event;
+- **contract structure:** different futures delivery months carry different physical and liquidity risks.
+
+The strike coordinate must be defined relative to the correct futures contract. A September corn option and a December corn option should not be pooled as if they were observations on one spot asset. Their forward levels, delivery months, seasonal exposures, and report sensitivities differ.
+
+A surface is constrained by more than smoothness. At a fixed expiry, call prices should generally be decreasing and convex in strike; vertical spreads must be non-negative and butterfly prices must not be negative. Across expiry, calendar relationships must be checked using the relevant forward and discount conventions. Interpolation that looks smooth can still create static arbitrage or distort the Greeks of a portfolio.
+
+The following is a synthetic quote panel. Its purpose is to display the coordinates used by a surface model, not to assert a particular corn-volatility shape.
+
+```{python}
+#| label: ch5-volatility-surface-coordinates
+
+forward = 4.50
+maturities = np.array([30, 90, 180]) / 365
+log_moneyness = np.array([-0.12, -0.06, 0.00, 0.06, 0.12])
+
+surface_rows = []
+for tau in maturities:
+    for k in log_moneyness:
+        # Stylized downside skew, smile curvature, and term structure.
+        implied_vol = (
+            0.29
+            - 0.16 * k
+            + 0.40 * k**2
+            + 0.015 * sqrt(tau)
+        )
+        strike = forward * exp(k)
+        surface_rows.append(
+            {
+                "expiry_years": tau,
+                "log_moneyness": k,
+                "strike": strike,
+                "implied_volatility": implied_vol,
+                "total_variance": implied_vol**2 * tau,
+            }
+        )
+
+surface = pd.DataFrame(surface_rows)
+surface.round(5)
+```
+
+Practitioner conventions such as ATM volatility, 25-delta risk reversals, and 25-delta butterflies are useful summaries, but they are not substitutes for the full strike-expiry panel. A risk reversal combines two option marks with different deltas; its interpretation changes as the forward, maturity, and surface move.
+
+## 5. Hedging an option book requires more than delta
+
+For option positions $n_i$ with multipliers $M_i$, the book-level local sensitivities are approximately
+
+$$
+\begin{aligned}
+\Delta_{\mathrm{book}} &=\sum_i n_iM_i\Delta_i,\\
+\Gamma_{\mathrm{book}} &=\sum_i n_iM_i\Gamma_i,\\
+\mathcal{V}_{\mathrm{book}} &=\sum_i n_iM_i\mathcal{V}_i.
+\end{aligned}
+$$
+
+The delta is a futures-equivalent exposure. A delta hedge can reduce first-order futures risk, but it does not remove gamma, vega, theta, skew, basis, liquidity, or event risk. A short-option book can be delta-neutral and still have a large loss on a gap move or an implied-volatility repricing.
+
+A transparent book calculation is more useful than a printed object representation because it shows the sign and unit conversion.
+
+```{python}
+#| label: ch5-book-greeks
+
+book = pd.DataFrame(
+    {
+        "position_contracts": [-10, 6],
+        "multiplier": [5_000, 5_000],
+        "delta": [delta_call, -delta_call],
+        "gamma": [gamma_call, gamma_call],
+        "vega_per_vol_point": [vega_call / 100, vega_call / 100],
+    },
+    index=["short ATM calls", "long ATM puts"],
+)
+
+book["delta_futures_units"] = (
+    book["position_contracts"] * book["multiplier"] * book["delta"]
+)
+book["gamma_units"] = (
+    book["position_contracts"] * book["multiplier"] * book["gamma"]
+)
+book["vega_currency_per_vol_point"] = (
+    book["position_contracts"]
+    * book["multiplier"]
+    * book["vega_per_vol_point"]
+)
+
+summary = pd.DataFrame(
+    {
+        "book_delta_futures_units": [book["delta_futures_units"].sum()],
+        "book_gamma_units": [book["gamma_units"].sum()],
+        "book_vega_currency_per_vol_point": [
+            book["vega_currency_per_vol_point"].sum()
+        ],
+    }
+)
+summary.round(4)
+```
+
+The position labels are deliberately simple. In a live book, the aggregation key must also include commodity, delivery month, option expiry, strike, exercise style, settlement convention, currency, and price source. Netting Greeks across contracts with different delivery exposures can conceal basis or curve risk.
+
+A first-order delta hedge is only the beginning. The local P&L decomposition should be reconciled to actual marks,
+
+$$
+\text{option P\&L}
+\approx
+\text{delta P\&L}
++\text{gamma P\&L}
++\text{vega P\&L}
++\text{theta P\&L}
++\text{residual},
+$$
+
+with the residual investigated rather than silently attributed to “noise”. The residual may contain strike-dependent volatility motion, futures-contract changes, jumps, bid–ask, settlement timing, and model error.
+
+## 6. Agricultural event risk changes the meaning of volatility
+
+Agricultural options embed discrete information events: WASDE releases, acreage and stocks reports, crop-condition updates, weather transitions, policy announcements, export restrictions, and delivery-period developments. A smooth annualized volatility can hide a large fraction of the risk in one or two observations.
+
+A useful decomposition is in variance units,
+
+$$
+\operatorname{Var}(\Delta F)
+\approx
+\operatorname{Var}(\Delta F_{\mathrm{background}})
++\operatorname{Var}(\Delta F_{\mathrm{event}}),
+$$
+
+provided the components are defined consistently and covariance is not ignored. A short-dated option expiring immediately after a report can carry substantial event variance even when ordinary day-to-day realized volatility is low. The reverse can also occur: an option expiring before the report may have little direct event exposure but still trade with a liquidity premium because the market is preparing for the event.
+
+For a straddle, the relevant comparison is not “implied volatility versus average historical volatility”. It is closer to:
+
+$$
+\text{expected physical event move}
+-\text{all-in straddle premium}
+-\text{execution and financing costs}
+-\text{risk premium for gap and liquidity exposure}.
+$$
+
+A long straddle has positive gamma and vega but pays theta. A short straddle collects theta and is short convexity and usually short event variance. A risk reversal, vertical, or calendar expresses a more targeted view and changes which part of the surface is being bought or sold.
+
+| Structure | Primary exposure | Agricultural question |
+|:--|:--|:--|
+| Long straddle | Long gamma and vega, short theta | Is the report/weather move likely to exceed the premium? |
+| Put spread | Downside convexity with defined risk | Is downside protection expensive relative to the expected scarcity reversal? |
+| Risk reversal | Skew and directional exposure | Is downside or upside insurance mispriced relative to the physical distribution? |
+| Calendar option spread | Term structure of variance and event timing | Is volatility concentrated in the nearby report or delivery window? |
+
+The market-research problem is to define the event timestamp, the pre-event information set, the option and futures contract, the expected move distribution, the quote window, and the post-event mark. A backtest that uses the final report number or a post-release implied volatility is not a test of an ex ante event strategy.
+
+## 7. Implied, realized, and forecast volatility are different objects
+
+Let $\widehat{\sigma}^{\mathbb{Q}}_{t,T}$ denote the implied volatility extracted from an option quote. Let $\sigma^{\mathbb{P}}_{t,T}$ denote a physical-measure forecast of future volatility, and let $\sigma^{\mathrm{realized}}_{t,T}$ denote the volatility subsequently observed under a specified sampling and roll convention. These objects answer different questions:
+
+- implied volatility is the volatility coordinate that makes a pricing model reproduce the option price;
+- a physical forecast is a conditional estimate made using a declared information set;
+- realized volatility is an ex post statistic whose value depends on contract identity, timestamps, returns, jumps, and sampling.
+
+A variance-risk-premium comparison should be stated in variance units and evaluated ex post or through a forecast model,
+
+$$
+\mathrm{VRP}_{t,T}
+=\left(\widehat{\sigma}^{\mathbb{Q}}_{t,T}\right)^2
+-\mathbb{E}^{\mathbb{P}}_t
+\left[\left(\sigma^{\mathrm{realized}}_{t,T}\right)^2\right].
+$$
+
+Replacing the conditional expectation with the realized outcome creates an ex post diagnostic, not a decision-time estimate. In agriculture, the distinction is especially important because weather and report shocks make the realized distribution fat-tailed and state-dependent.
+
+A realized-volatility series must preserve contract identity. Computing volatility on a rolled nearby series mixes price risk with the researcher’s roll rule. For options, the appropriate realized benchmark may instead use the underlying futures contract held during the option’s risk horizon, with explicit treatment of days when that contract is illiquid or near delivery.
+
+## 8. A professional option-risk validation chain
+
+The option model should be validated at four levels.
+
+| Level | Question | Minimum evidence |
+|:--|:--|:--|
+| Quote integrity | Is the option mapped to the correct futures contract and expiry? | Contract identifiers, timestamps, units, bid–ask, and settlement reconciliation |
+| Static valuation | Does the benchmark reproduce prices and parity? | Black–76 repricing, bounds, put–call parity, and monotonicity checks |
+| Dynamic risk | Do Greeks explain actual P&L? | Delta/gamma/vega/theta attribution plus residual analysis |
+| Economic value | Does the strategy earn compensation after risk and costs? | Walk-forward marks, event timing, slippage, margin, liquidity, drawdown, and stress |
+
+A surface model must also be tested for stability across delivery months, crop years, report windows, and liquidity regimes. A lower pricing error is not automatically a better trading model if it is obtained by smoothing away the very event risk the portfolio must carry.
+
+The implementation sequence for the framework is therefore:
+
+1. scalar Black–76 pricing and parity checks;
+2. implied-volatility inversion with quote validation;
+3. contract-level Greeks with explicit multipliers;
+4. a strike-expiry surface representation;
+5. portfolio Greek aggregation and scenario revaluation;
+6. historical mark/P&L attribution;
+7. only then, empirical volatility signals and options strategies.
+
+## Review checkpoint
+
+Before moving to portfolio construction and risk allocation, you should be able to answer these questions:
+
+1. Why is Black–76 written on the futures price rather than the spot price?
+2. What exactly is the unit of a Black–76 premium, delta, vega, and gamma for a 5,000-bushel contract?
+3. Why is implied volatility an inverse-pricing coordinate rather than a direct forecast of realized volatility?
+4. Which static arbitrage checks should be applied before interpreting an extreme implied volatility?
+5. Why can a delta-neutral option book still lose materially on a report or weather gap?
+6. How does the strike-expiry surface differ across corn delivery months?
+7. What evidence would distinguish an apparent volatility risk premium from compensation for jump, liquidity, or model risk?
+
+## Focused reading
+
+- Geman, *Commodities and Commodity Derivatives*, the chapters on option valuation, Black–76, volatility, and spread options [@geman2005].
+- Black, “The Pricing of Commodity Contracts,” for the futures-option benchmark [@black1976].
+- Schwartz, “The Stochastic Behavior of Commodity Prices: Implications for Valuation and Hedging,” for the link between commodity state models, valuation, and hedging [@schwartz1997].
+
+The next chapter will develop portfolio construction and risk allocation: position sizing, covariance estimation, marginal risk contribution, volatility targeting, stress testing, and the difference between a collection of trades and a managed risk budget.
