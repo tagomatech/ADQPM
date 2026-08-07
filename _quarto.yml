@@ -6,7 +6,6 @@ project:
 book:
   title: "Agriculture Derivatives & Quantitative Portfolio Management"
   author: ""
-  date: today
   chapters:
     - index.qmd
     - module-01.qmd

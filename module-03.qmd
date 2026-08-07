@@ -7,27 +7,12 @@ description: "How agricultural observations become point-in-time, cost-aware, an
 #| label: m3-setup
 #| echo: false
 
-from pathlib import Path
-import sys
-
-COURSE_ROOT = Path.cwd()
-SRC = COURSE_ROOT / "src"
-if SRC.exists() and str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agpm.fundamentals import cash_basis
-from agpm.research import (
-    expanding_group_zscore,
-    grouped_zscore,
-    performance_summary,
-    strategy_pnl,
-    threshold_position,
-    walk_forward_splits,
-)
+
 ```
 
 ## Scope and learning contract
@@ -89,10 +74,15 @@ seasonal_fixture = pd.DataFrame(
         "basis": [-0.18, -0.10, -0.04, 0.02],
     }
 )
-seasonal_fixture["descriptive_z"] = grouped_zscore(
-    seasonal_fixture["basis"],
-    seasonal_fixture["crop_bucket"],
+# Full-sample standardization is descriptive: every row contributes to
+# the mean and scale of its crop-calendar bucket.
+group_mean = seasonal_fixture.groupby("crop_bucket")["basis"].transform("mean")
+group_std = seasonal_fixture.groupby("crop_bucket")["basis"].transform(
+    lambda values: values.std(ddof=1)
 )
+seasonal_fixture["descriptive_z"] = (
+    seasonal_fixture["basis"] - group_mean
+) / group_std.replace(0.0, np.nan)
 seasonal_fixture
 ```
 
@@ -127,11 +117,20 @@ basis = pd.Series(
     index=dates,
     name="basis",
 )
-basis_score = expanding_group_zscore(
-    basis,
-    month,
-    min_history=10,
-)
+# At each date, use only earlier observations from the same calendar month.
+basis_score = pd.Series(np.nan, index=basis.index, name="basis")
+history = {}
+for timestamp, value, bucket in zip(basis.index, basis, month, strict=True):
+    observations = history.setdefault(bucket, [])
+    if np.isfinite(value) and len(observations) >= 10:
+        scale = np.std(observations, ddof=1)
+        if scale > 0.0:
+            basis_score.loc[timestamp] = (
+                value - np.mean(observations)
+            ) / scale
+    if np.isfinite(value):
+        observations.append(float(value))
+
 pd.DataFrame({"basis": basis, "month": month, "point_in_time_z": basis_score}).tail()
 ```
 
@@ -170,7 +169,7 @@ hedge_panel = pd.DataFrame(
     },
     index=pd.bdate_range("2026-09-01", periods=5),
 )
-hedge_panel["basis"] = cash_basis(hedge_panel["cash"], hedge_panel["futures"])
+hedge_panel["basis"] = hedge_panel["cash"] - hedge_panel["futures"]
 hedge_panel["basis_change"] = hedge_panel["basis"].diff()
 hedge_panel["futures_change"] = hedge_panel["futures"].diff()
 hedge_panel
@@ -197,15 +196,15 @@ where $r_{t+1}$ is the next-period return of the defined tradable object.
 A threshold rule can deliberately avoid trading small or noisy scores:
 
 ```{python}
-position = threshold_position(
-    -basis_score,
-    threshold=1.0,
-    max_position=1.0,
-)
+score = -basis_score  # hypothetical mean-reversion direction
+position = pd.Series(0.0, index=score.index, name="target_position")
+position.loc[score > 1.0] = 1.0
+position.loc[score < -1.0] = -1.0
+
 pd.DataFrame(
     {
         "basis": basis,
-        "score": basis_score,
+        "score": score,
         "target_position": position,
     }
 ).dropna().tail()
@@ -224,22 +223,30 @@ $$
 = q_t r_{t+1} - c\left|q_t-q_{t-1}\right|.
 $$
 
-The absolute position change is a first-order proxy for bid/ask crossing, commissions, exchange fees, and slippage. The helper also charges the initial move from zero into the target position. A professional implementation may replace the linear approximation with a market-impact model, but it should not omit trading frictions merely because the signal is theoretical.
+The absolute position change is a first-order proxy for bid/ask crossing, commissions, exchange fees, and slippage. The explicit calculation also charges the initial move from zero into the target position. A professional implementation may replace the linear approximation with a market-impact model, but it should not omit trading frictions merely because the signal is theoretical.
 
-The framework makes the lag and cost deductions explicit:
+The following cell makes the lag, turnover, gross P&L, and cost deductions explicit:
 
 ```{python}
 basis_return = basis.diff() / 4.25
-backtest = strategy_pnl(
-    position,
-    basis_return,
-    position_lag=1,
-    cost_per_unit_turnover=0.0005,
+position_used = position.shift(1).fillna(0.0)
+turnover = position_used.diff().abs().fillna(position_used.abs())
+cost_per_unit_turnover = 0.0005
+backtest = pd.DataFrame(
+    {
+        "target_position": position,
+        "position_used": position_used,
+        "period_return": basis_return,
+        "turnover": turnover,
+    }
 )
+backtest["gross_pnl"] = backtest["position_used"] * backtest["period_return"]
+backtest["costs"] = cost_per_unit_turnover * backtest["turnover"]
+backtest["net_pnl"] = backtest["gross_pnl"] - backtest["costs"]
 backtest["net_pnl"].dropna().head()
 ```
 
-The return must be defined before the backtest starts. Here basis_return is indexed at the period in which the basis change is realized, so position_lag=1 maps the signal observed at time $t$ to the return realized at $t+1$. Dividing a basis change by 4.25 creates a normalized illustrative return; it is not a CME contract return and does not include the corn multiplier. For a real calendar spread, the return should be derived from the marked two-leg portfolio, including leg multipliers, execution prices, margin, and costs.
+The return must be defined before the backtest starts. Here basis_return is indexed at the period in which the basis change is realized, so the one-row shift in position_used maps the signal observed at time $t$ to the return realized at $t+1$. Dividing a basis change by 4.25 creates a normalized illustrative return; it is not a CME contract return and does not include the corn multiplier. For a real calendar spread, the return should be derived from the marked two-leg portfolio, including leg multipliers, execution prices, margin, and costs.
 
 A common error is to use a signal on a daily close, multiply it by the same close-to-close return, and then subtract a small generic cost. That convention can embed an impossible trade at the closing price and understate the cost of changing the position. The research record should state signal timestamp, execution timestamp, price field, lag, and cost model.
 
@@ -257,12 +264,17 @@ $$
 The half-open interval notation matters: the observation at $t_j$ is not part of the training window if it is used to make the first test decision. After the test window is complete, the origin can advance and the model can be refit.
 
 ```{python}
-splits = walk_forward_splits(
-    len(basis),
-    train_size=60,
-    test_size=20,
-    step=20,
-)
+train_size = 60
+test_size = 20
+step = 20
+splits = []
+test_start = train_size
+while test_start + test_size <= len(basis):
+    train = np.arange(test_start - train_size, test_start)
+    test = np.arange(test_start, test_start + test_size)
+    splits.append((train, test))
+    test_start += step
+
 pd.DataFrame(
     [
         {
@@ -277,7 +289,7 @@ pd.DataFrame(
 )
 ```
 
-This utility returns index ranges; it does not fit a model for you. That is intentional. The researcher must decide which transformations are fitted, which parameters are fixed, how missing observations are handled, and whether the test period is truly untouched.
+The loop exposes the split boundary directly. It does not fit a model for you. That is intentional: the researcher must decide which transformations are fitted, which parameters are fixed, how missing observations are handled, and whether the test period is truly untouched.
 
 For horizons longer than one period, observations may overlap. A five-day forward return computed each day shares four days with its neighbors, so naive standard errors and independent-observation assumptions are wrong. Possible controls include non-overlapping sampling, explicit horizon-aware inference, purging observations near the train/test boundary, and an embargo after training data. These are statistical controls, not cosmetic backtest settings.
 
@@ -301,13 +313,25 @@ where $A$ is the number of periods per year. It is useful but incomplete. At min
 - sample period, number of observations, and out-of-sample fraction.
 
 ```{python}
-performance_summary(
-    backtest["net_pnl"],
-    periods_per_year=252,
+returns = backtest["net_pnl"].dropna()
+equity = (1.0 + returns).cumprod()
+drawdown = equity / equity.cummax() - 1.0
+volatility = returns.std(ddof=1) * np.sqrt(252)
+performance = pd.Series(
+    {
+        "observations": len(returns),
+        "total_return": equity.iloc[-1] - 1.0,
+        "annualized_return": equity.iloc[-1] ** (252 / len(returns)) - 1.0,
+        "annualized_volatility": volatility,
+        "sharpe_zero_rate": returns.mean() / returns.std(ddof=1) * np.sqrt(252),
+        "hit_rate": (returns > 0).mean(),
+        "max_drawdown": drawdown.min(),
+    }
 )
+performance
 ```
 
-The summary above is an accounting of the synthetic fixture. It is not evidence for a basis strategy. A strategy with a high Sharpe may still be unattractive if it is capacity constrained, exposed to one crop year, dependent on an unrealistic close price, or selected after many unreported trials.
+The summary above is an accounting of the synthetic fixture. It is not evidence for a basis strategy. The formulas are shown here because a performance report is a sequence of definitions, not a black-box score. A strategy with a high Sharpe may still be unattractive if it is capacity constrained, exposed to one crop year, dependent on an unrealistic close price, or selected after many unreported trials.
 
 Attribution should connect returns to the mechanism. For a basis signal, useful partitions include:
 

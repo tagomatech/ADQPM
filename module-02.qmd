@@ -7,26 +7,12 @@ description: "From agricultural balance sheets to point-in-time tradable hypothe
 #| label: m2-setup
 #| echo: false
 
-from pathlib import Path
-import sys
-
-COURSE_ROOT = Path.cwd()
-SRC = COURSE_ROOT / "src"
-if SRC.exists() and str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agpm.fundamentals import (
-    cash_basis,
-    ending_stocks,
-    latest_vintage_at,
-    release_surprise,
-    stocks_to_use,
-)
-from agpm.futures import CORN
+
 ```
 
 ## Scope and learning contract
@@ -81,20 +67,20 @@ balance = pd.DataFrame(
     }
 )
 
-balance["ending_stocks_m_bushels"] = ending_stocks(
-    balance["beginning_stocks_m_bushels"],
-    balance["production_m_bushels"],
-    balance["imports_m_bushels"],
-    balance["domestic_use_m_bushels"],
-    balance["exports_m_bushels"],
-    balance["other_disappearance_m_bushels"],
+balance["ending_stocks_m_bushels"] = (
+    balance["beginning_stocks_m_bushels"]
+    + balance["production_m_bushels"]
+    + balance["imports_m_bushels"]
+    - balance["domestic_use_m_bushels"]
+    - balance["exports_m_bushels"]
+    - balance["other_disappearance_m_bushels"]
 )
 balance
 ```
 
-The calculation is deliberately boring. A balance-sheet function should not forecast, smooth, or infer a price. It should make the conservation equation reproducible and auditable. If a reported table does not reconcile, the discrepancy should be labelled as a residual or data-quality issue rather than hidden inside a model.
+The calculation is deliberately boring. A balance-sheet calculation should not forecast, smooth, or infer a price. It should make the conservation equation reproducible and auditable. If a reported table does not reconcile, the discrepancy should be labelled as a residual or data-quality issue rather than hidden inside a model.
 
-All terms must use the same unit and period. Mixing bushels with metric tonnes, crop years with calendar years, or a revised production estimate with an unrevised use estimate can create a numerically precise but economically meaningless feature. Unit conversions belong in a documented data layer; the balance function should receive normalized inputs.
+All terms must use the same unit and period. Mixing bushels with metric tonnes, crop years with calendar years, or a revised production estimate with an unrevised use estimate can create a numerically precise but economically meaningless feature. Unit conversions belong in a documented data layer; the balance calculation should receive normalized inputs.
 
 ## 2. Stocks-to-use is a state descriptor—not a complete price forecast
 
@@ -154,9 +140,8 @@ balance["total_use_m_bushels"] = (
     + balance["exports_m_bushels"]
     + balance["other_disappearance_m_bushels"]
 )
-balance["stocks_to_use"] = stocks_to_use(
-    balance["ending_stocks_m_bushels"],
-    balance["total_use_m_bushels"],
+balance["stocks_to_use"] = (
+    balance["ending_stocks_m_bushels"] / balance["total_use_m_bushels"]
 )
 balance[["marketing_year", "ending_stocks_m_bushels", "total_use_m_bushels", "stocks_to_use"]]
 ```
@@ -236,7 +221,8 @@ hedge = pd.DataFrame(
         "december_futures": [4.20, 4.22, 4.25, 4.24, 4.27],
     }
 )
-hedge["basis"] = cash_basis(hedge["local_cash"], hedge["december_futures"])
+hedge["basis"] = hedge["local_cash"] - hedge["december_futures"]
+hedge["basis_change"] = hedge["basis"].diff()
 hedge
 ```
 
@@ -275,15 +261,23 @@ vintages = pd.DataFrame(
     }
 )
 
-available_before_september_report = latest_vintage_at(
-    vintages,
-    "2026-09-01 12:00",
-    keys=["marketing_year"],
+def latest_available_vintage(frame, decision_time):
+    """Apply the point-in-time filter, then retain the latest vintage per year."""
+    available = frame.loc[
+        frame["release_time"] <= pd.Timestamp(decision_time)
+    ].copy()
+    return (
+        available.sort_values(["marketing_year", "release_time"])
+        .drop_duplicates("marketing_year", keep="last")
+        .sort_values("marketing_year")
+        .reset_index(drop=True)
+    )
+
+available_before_september_report = latest_available_vintage(
+    vintages, "2026-09-01 12:00"
 )
-available_after_september_report = latest_vintage_at(
-    vintages,
-    "2026-09-12 12:00",
-    keys=["marketing_year"],
+available_after_september_report = latest_available_vintage(
+    vintages, "2026-09-12 12:00"
 )
 
 available_before_september_report, available_after_september_report
@@ -304,7 +298,7 @@ where $A_t$ is the released observation and $E_t$ is the expectation observable 
 ```{python}
 reported_stocks = 1_750
 market_expectation = 1_840
-surprise = release_surprise(reported_stocks, market_expectation)
+surprise = reported_stocks - market_expectation
 pd.DataFrame(
     {
         "reported_stocks_m_bushels": [reported_stocks],
