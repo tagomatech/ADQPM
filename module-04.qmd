@@ -1,0 +1,518 @@
+---
+title: "Chapter 4 — Stochastic commodity-price and futures-curve models"
+description: "A state-space foundation for agricultural futures dynamics, curve hedging, and later option valuation."
+---
+
+```{python}
+#| label: ch4-setup
+#| echo: false
+
+import numpy as np
+import pandas as pd
+```
+
+## Chapter question and learning outcomes
+
+The previous chapters defined the contract, the physical state, and the information set. The next question is more demanding:
+
+> What stochastic state variables can explain a cross-section of agricultural futures prices, and how can those state variables support pricing, hedging, forecasting, and portfolio construction?
+
+The answer is not a single “commodity price model”. A model must declare its purpose. A model used to price an option under a pricing measure is not automatically a model of expected returns under the physical measure. A model that fits the current curve is not automatically a useful hedge model. A model that forecasts a return is not automatically a valid risk model.
+
+This chapter develops a compact but professional foundation:
+
+1. a one-factor mean-reverting benchmark;
+2. a two-factor long-term-level/short-term-deviation model;
+3. deterministic agricultural seasonality;
+4. a futures-panel state-space representation;
+5. calibration, filtering, and identification controls;
+6. the translation from latent factors to hedges, signals, and portfolio risk.
+
+The chapter is deliberately model-first. The implementation examples expose the equations that matter; they do not hide the logic behind a library call.
+
+## 1. A futures curve is a cross-section of conditional prices
+
+Let $F(t,T)$ denote the price at decision time $t$ of a futures contract whose economic delivery or settlement date is $T$. In an agricultural market, $T$ is not merely a time-to-expiry label. It identifies a crop-year exposure, delivery location, grade, and exchange rule. Two contracts with similar maturities can still have different economic exposures if their delivery conventions differ.
+
+The state of the market at $t$ is therefore observed through a panel,
+
+$$
+\mathcal{F}_t
+=\left\{F(t,T_j),\;T_j,\;\text{contract specification}_j\right\}_{j=1}^{n_t},
+$$
+
+not through one continuous price series. A continuous series can be useful for a chart or a first descriptive statistic, but it is an observation convention created by the researcher. It is not itself a traded contract.
+
+For a futures contract with deterministic interest rates, the risk-neutral representation is
+
+$$
+F(t,T)=\mathbb{E}^{\mathbb{Q}}_t[S_T],
+$$
+
+where $S_T$ is the delivery-market spot value of the relevant commodity and $\mathbb{Q}$ is the pricing measure. With stochastic interest rates, the distinction between futures and forwards matters because daily futures settlement creates a covariance channel between interest rates and the underlying. The formula above is used here as the deterministic-rate benchmark, not as a universal identity.
+
+The physical-measure expectation,
+
+$$
+\mathbb{E}^{\mathbb{P}}_t[S_T],
+$$
+
+answers a different question: what the market or a model expects the future commodity value to be, before risk premia and pricing-measure adjustments. Quantitative agricultural research must keep these measures separate. Otherwise, a curve fitted for derivative valuation is quietly interpreted as a return forecast.
+
+::: {.callout-important}
+### The measure is part of the model
+
+Parameters estimated from historical futures returns describe a physical-measure object only under explicit assumptions. Parameters calibrated to option prices describe a pricing-measure object. The difference is not a technical footnote: it is where risk premia, hedging demand, inventory scarcity, and model risk enter.
+:::
+
+## 2. One-factor mean reversion: the benchmark
+
+Let $X_t=\log S_t$ be the logarithm of the spot value. A one-factor mean-reverting model under the physical measure is
+
+$$
+dX_t=\kappa_{\mathbb{P}}(\theta_{\mathbb{P}}-X_t)\,dt
++\sigma_{\mathbb{P}}\,dW_t^{\mathbb{P}},
+$$
+
+where $\kappa_{\mathbb{P}}>0$ is the speed of mean reversion, $\theta_{\mathbb{P}}$ is the long-run log-price level, and $\sigma_{\mathbb{P}}$ is the instantaneous volatility. The half-life of a deviation is
+
+$$
+t_{1/2}=\frac{\log 2}{\kappa_{\mathbb{P}}}.
+$$
+
+The half-life is a useful communication device, but it is not evidence that a trading signal should be held for that period. It describes the conditional decay of a model state under a selected measure and regime.
+
+For a pricing application, use the corresponding risk-neutral parameters. If $\tau=T-t$ and
+
+$$
+dX_u=\kappa_{\mathbb{Q}}(\theta_{\mathbb{Q}}-X_u)\,du
++\sigma_{\mathbb{Q}}\,dW_u^{\mathbb{Q}},
+$$
+
+then the exact Gaussian transition gives
+
+$$
+\begin{aligned}
+\mathbb{E}^{\mathbb{Q}}_t[X_T]
+&=\theta_{\mathbb{Q}}
++e^{-\kappa_{\mathbb{Q}}\tau}(X_t-\theta_{\mathbb{Q}}),\\
+\operatorname{Var}^{\mathbb{Q}}_t(X_T)
+&=\frac{\sigma_{\mathbb{Q}}^2}{2\kappa_{\mathbb{Q}}}
+\left(1-e^{-2\kappa_{\mathbb{Q}}\tau}\right).
+\end{aligned}
+$$
+
+Because $S_T=e^{X_T}$ is lognormal under this benchmark,
+
+$$
+\log F(t,T)
+=\theta_{\mathbb{Q}}
++e^{-\kappa_{\mathbb{Q}}\tau}(X_t-\theta_{\mathbb{Q}})
++\frac{\sigma_{\mathbb{Q}}^2}{4\kappa_{\mathbb{Q}}}
+\left(1-e^{-2\kappa_{\mathbb{Q}}\tau}\right).
+$$
+
+The loading
+
+$$
+B(\tau)=e^{-\kappa_{\mathbb{Q}}\tau}
+$$
+
+is the central object. The current spot state has a large influence on a nearby contract and a smaller influence on a deferred contract. Mean reversion therefore creates a term-structure effect even before adding an explicit storage model.
+
+The following calculation is intentionally small. It makes the maturity loading and the model-implied curve visible without invoking a curve or pricing abstraction.
+
+```{python}
+#| label: ch4-one-factor-curve
+
+tau = np.array([1 / 12, 3 / 12, 6 / 12, 12 / 12, 18 / 12])
+spot = 4.50
+kappa_q = 1.10
+theta_q = np.log(4.35)
+sigma_q = 0.35
+x_t = np.log(spot)
+
+loading = np.exp(-kappa_q * tau)
+log_futures = (
+    theta_q
+    + loading * (x_t - theta_q)
+    + sigma_q**2 / (4 * kappa_q) * (1 - np.exp(-2 * kappa_q * tau))
+)
+
+pd.DataFrame(
+    {
+        "time_to_delivery_years": tau,
+        "spot_loading": loading,
+        "model_futures_price": np.exp(log_futures),
+    }
+).round(4)
+```
+
+### What the benchmark gets wrong
+
+The one-factor model is useful because its assumptions are inspectable. It is also too restrictive for most agricultural applications:
+
+- one state variable cannot separately explain a broad curve move and a nearby shock;
+- a single long-run level is a poor representation of crop-year-dependent equilibrium conditions;
+- constant volatility misses report risk, weather risk, limit moves, and scarcity regimes;
+- a smooth diffusion does not represent delivery squeezes, jumps, or exchange-imposed discontinuities;
+- the physical and pricing measures require different parameterizations.
+
+The benchmark should therefore be retained as a nested model. A richer model earns its complexity by improving a specified pricing, hedging, forecasting, or risk task.
+
+## 3. Two factors: long-term level and short-term deviation
+
+The long-term/short-term representation is especially useful for a futures panel. Write the logarithm of spot as
+
+$$
+\log S_t=\chi_t+\xi_t,
+$$
+
+with, under a chosen pricing measure,
+
+$$
+\begin{aligned}
+d\chi_t &= \mu_{\chi}\,dt+\sigma_{\chi}\,dW_{\chi,t},\\
+d\xi_t &= -\kappa\xi_t\,dt+\sigma_{\xi}\,dW_{\xi,t},\\
+dW_{\chi,t}\,dW_{\xi,t} &= \rho\,dt.
+\end{aligned}
+$$
+
+The level factor $\chi_t$ moves slowly and remains visible in deferred contracts. The short-term factor $\xi_t$ mean-reverts and is weighted strongly in nearby contracts. This is not a claim that the physical market literally contains two tradable state variables. It is a parsimonious representation of the information embedded in a cross-section of prices.
+
+For $\tau=T-t$, the futures price has the affine form
+
+$$
+\log F(t,T)=a_{\mathbb{Q}}(\tau)+\chi_t+e^{-\kappa\tau}\xi_t,
+$$
+
+where, for the Gaussian specification above,
+
+$$
+\begin{aligned}
+a_{\mathbb{Q}}(\tau)
+={}&\mu_{\chi}\tau
++\frac{1}{2}\Bigg[
+\sigma_{\chi}^2\tau
++\frac{\sigma_{\xi}^2}{2\kappa}
+\left(1-e^{-2\kappa\tau}\right)\\
+&\qquad\qquad
++\frac{2\rho\sigma_{\chi}\sigma_{\xi}}{\kappa}
+\left(1-e^{-\kappa\tau}\right)
+\Bigg].
+\end{aligned}
+$$
+
+The exact form of $a_{\mathbb{Q}}$ changes with the choice of drift, seasonality, interest-rate, and convenience-yield specification. The economically important structure is the maturity loading $e^{-\kappa\tau}$.
+
+| Observed curve behaviour | Factor interpretation | Trading implication |
+|:--|:--|:--|
+| Most maturities move together | Change in $\chi_t$ | Outright level risk dominates |
+| Nearby moves more than deferred contracts | Change in $\xi_t$ | Calendar-spread and basis risk dominate |
+| Curve curvature changes | More than two factors, seasonality, or measurement effects | A two-factor hedge may be incomplete |
+| One contract dislocates | Delivery, liquidity, quality, or local physical effect | Treat as a contract-specific residual before calling it a factor |
+
+The model is closely related to the stochastic-convenience-yield tradition. Gibson and Schwartz formulate a two-factor model in terms of spot and convenience yield; Schwartz and Smith formulate the same broad information structure as a long-term factor and a short-term deviation [@gibsonSchwartz1990; @schwartzSmith2000]. The parameterization changes the interpretation of the latent factors, so “convenience yield” should not be assigned to an estimated factor without deriving the mapping.
+
+The next cell shows how the two factors generate a curve. The coefficients are illustrative, not calibrated market estimates.
+
+```{python}
+#| label: ch4-two-factor-curve
+
+tau = np.array([1 / 12, 3 / 12, 6 / 12, 12 / 12, 18 / 12])
+mu_q = 0.015
+kappa = 1.10
+sigma_chi = 0.18
+sigma_xi = 0.42
+rho = -0.25
+chi_t = np.log(4.20)
+xi_t = 0.12
+
+loading = np.exp(-kappa * tau)
+variance = (
+    sigma_chi**2 * tau
+    + sigma_xi**2 / (2 * kappa) * (1 - np.exp(-2 * kappa * tau))
+    + 2 * rho * sigma_chi * sigma_xi / kappa * (1 - np.exp(-kappa * tau))
+)
+a_q = mu_q * tau + 0.5 * variance
+log_futures = a_q + chi_t + loading * xi_t
+
+pd.DataFrame(
+    {
+        "time_to_delivery_years": tau,
+        "short_factor_loading": loading,
+        "log_futures_price": log_futures,
+        "futures_price": np.exp(log_futures),
+    }
+).round(4)
+```
+
+## 4. Agricultural seasonality is part of the observation model
+
+Agricultural seasonality is not a cosmetic adjustment to a chart. Harvest timing, storage availability, feed demand, crushing demand, export windows, and contract delivery conventions produce predictable calendar structure. Weather and policy shocks then arrive on top of that structure.
+
+Let $s(T)$ denote a deterministic seasonal component evaluated at the contract’s delivery date. A seasonal two-factor specification can be written as
+
+$$
+\log F(t,T)
+=s(T)+a_{\mathbb{Q}}(\tau)+\chi_t+e^{-\kappa\tau}\xi_t.
+$$
+
+The timing matters. A seasonal component for the delivery month is not interchangeable with a component indexed by the observation date. For a corn contract observed in March and delivered in December, the relevant physical seasonality is linked to the December exposure, while the information set is dated in March.
+
+“Seasonally adjusted” should mean that a declared deterministic component has been removed from a specified object. It does not mean that the residual is stationary, free of crop-year effects, or safe to trade. A useful seasonal specification must state:
+
+- the calendar used: calendar month, crop month, delivery month, or marketing year;
+- whether the adjustment applies to price levels, log prices, returns, basis, or volatility;
+- the estimation window and whether it is point-in-time;
+- whether the seasonal pattern is allowed to change across regimes;
+- how missing, newly listed, and delivery-period contracts are handled.
+
+Fourier terms are compact, but they are not automatically superior to crop-calendar effects. A smooth sinusoid can be inappropriate when the economics change sharply around harvest, while month dummies can overfit a short sample. The choice should be validated against out-of-sample curve fit, hedge performance, and stability—not selected because it produces the most attractive historical residual.
+
+## 5. A futures panel is a state-space observation system
+
+The two-factor model becomes operational when it is written as an observation equation. For the contracts available on date $t$, define
+
+$$
+y_{t,j}=\log F(t,T_{t,j})-s(T_{t,j}),
+$$
+
+and let
+
+$$
+\mathbf{x}_t=
+\begin{bmatrix}
+\chi_t\\
+\xi_t
+\end{bmatrix},
+\qquad
+\mathbf{H}_{t,j}=
+\begin{bmatrix}
+1 & e^{-\kappa\tau_{t,j}}
+\end{bmatrix}.
+$$
+
+Then
+
+$$
+y_{t,j}=a_{\mathbb{Q}}(\tau_{t,j})
++\mathbf{H}_{t,j}\mathbf{x}_t
++\varepsilon_{t,j},
+$$
+
+where $\varepsilon_{t,j}$ is contract-level measurement noise or model discrepancy. Stacking the available contracts gives
+
+$$
+\mathbf{y}_t=\mathbf{a}_t+\mathbf{H}_t\mathbf{x}_t+\boldsymbol{\varepsilon}_t.
+$$
+
+The state transition is also exact for the Gaussian model. For a time step $\Delta$,
+
+$$
+\mathbf{x}_{t+\Delta}
+=\begin{bmatrix}
+\chi_t+\mu_{\chi}\Delta\\
+ e^{-\kappa\Delta}\xi_t
+\end{bmatrix}
++\boldsymbol{\eta}_{t+\Delta},
+$$
+
+with transition covariance
+
+$$
+\mathbf{Q}(\Delta)=
+\begin{bmatrix}
+\sigma_{\chi}^2\Delta
+&\displaystyle \frac{\rho\sigma_{\chi}\sigma_{\xi}}{\kappa}
+\left(1-e^{-\kappa\Delta}\right)\\[6pt]
+\displaystyle \frac{\rho\sigma_{\chi}\sigma_{\xi}}{\kappa}
+\left(1-e^{-\kappa\Delta}\right)
+&\displaystyle \frac{\sigma_{\xi}^2}{2\kappa}
+\left(1-e^{-2\kappa\Delta}\right)
+\end{bmatrix}.
+$$
+
+This formulation clarifies why a futures panel is valuable. Maturity variation identifies the loading on the short-term factor. The time series identifies how the factors evolve. A single continuous nearby series throws away much of the cross-sectional information that distinguishes level from short-term deviation.
+
+The following synthetic calculation displays the observation matrix and recovers the two latent factors by cross-sectional least squares. It is not a substitute for a Kalman filter: there is no time-series prior here, and the state is estimated independently for one date. It is a transparent first diagnostic for whether the available maturities can identify the chosen factors at all.
+
+```{python}
+#| label: ch4-observation-matrix
+
+rng = np.random.default_rng(20260807)
+tau = np.array([1 / 12, 3 / 12, 6 / 12, 12 / 12, 18 / 12])
+kappa = 1.10
+loading = np.exp(-kappa * tau)
+H = np.column_stack([np.ones_like(tau), loading])
+
+deterministic_part = 0.02 * tau
+true_state = np.array([np.log(4.25), 0.10])
+noise = rng.normal(0.0, 0.006, size=tau.size)
+observed_log_curve = deterministic_part + H @ true_state + noise
+
+estimated_state, *_ = np.linalg.lstsq(
+    H, observed_log_curve - deterministic_part, rcond=None
+)
+fitted_log_curve = deterministic_part + H @ estimated_state
+
+diagnostic = pd.DataFrame(
+    {
+        "time_to_delivery_years": tau,
+        "short_factor_loading": loading,
+        "observed_price": np.exp(observed_log_curve),
+        "fitted_price": np.exp(fitted_log_curve),
+        "residual_bp": 10_000 * (observed_log_curve - fitted_log_curve),
+    }
+)
+
+print("Estimated [level, short-term deviation]:", estimated_state.round(5))
+diagnostic.round(4)
+```
+
+## 6. Calibration is an identification problem before it is an optimization problem
+
+A numerical optimizer can always return parameters. That does not mean the parameters are identified, economically meaningful, or stable. A professional calibration begins with the question: which variation in the data identifies each parameter?
+
+| Object | Variation that identifies it | Main control |
+|:--|:--|:--|
+| $\kappa$ | Decay of short-term deviations across time-to-delivery and time | Use multiple maturities and test half-life stability |
+| $\sigma_{\xi}$ | Nearby-versus-deferred dispersion and short-horizon innovations | Separate measurement noise from genuine short-term risk |
+| $\sigma_{\chi}$ | Long-horizon movement of the curve level | Use sufficiently long history and check structural breaks |
+| $\rho$ | Co-movement of level and short-term innovations | Do not infer it from a single spread series |
+| $s(T)$ | Repeatable delivery- or crop-calendar pattern | Estimate without future crop-year information |
+| Physical-measure drift | Predictive variation after carry and risk controls | Require an out-of-sample economic test |
+| Pricing-measure drift | Cross-sectional derivative prices | Require option or forward-price calibration and arbitrage checks |
+
+For a linear-Gaussian state-space model, the Kalman filter supplies innovations $\mathbf{v}_t$ and their covariance $\mathbf{S}_t$. The Gaussian log-likelihood is
+
+$$
+\ell(\vartheta)
+=-\frac{1}{2}\sum_t
+\left[
+\log\det\mathbf{S}_t
++\mathbf{v}_t^{\mathsf{T}}\mathbf{S}_t^{-1}\mathbf{v}_t
++n_t\log(2\pi)
+\right],
+$$
+
+where $\vartheta$ collects the transition, observation, seasonality, and noise parameters. The likelihood is a tool for comparing declared models; it is not a guarantee that the selected model describes the physical market.
+
+Calibration should be performed in layers:
+
+1. **Contract panel construction.** Preserve the exact contract, delivery date, quotation, multiplier, settlement timestamp, and listing history.
+2. **Observation design.** Compute time to delivery from contract identity and apply the stated seasonal component.
+3. **Nested benchmarks.** Compare one-factor, two-factor, and seasonality-augmented specifications.
+4. **Filtering and estimation.** Fit the state model with explicit initialization and parameter constraints.
+5. **Stability analysis.** Re-estimate by crop era, rolling window, and market regime.
+6. **Economic validation.** Test forecasts, hedge P&L, transaction costs, liquidity, and stress—not only likelihood.
+
+The practical distinction between a futures panel and a continuous series is decisive here. Rolling the nearest contract creates a return series whose jumps depend on the roll rule. It cannot be used as a neutral replacement for the original panel in a model whose purpose is to explain maturity-dependent prices.
+
+## 7. From latent factors to hedges and portfolio exposures
+
+For the two-factor observation equation, a contract’s approximate factor exposure is
+
+$$
+\mathbf{b}(\tau)=
+\begin{bmatrix}
+1\\
+e^{-\kappa\tau}
+\end{bmatrix}.
+$$
+
+A portfolio with signed contract notionals $w_j$ has approximate factor exposure
+
+$$
+\mathbf{B}_{\text{portfolio}}
+=\sum_j w_j\mathbf{b}(\tau_j).
+$$
+
+This does not replace currency risk. Each $w_j$ must first be expressed in a common P&L unit, using contract multipliers, quotation conventions, FX, and the selected price-difference horizon. Factor exposure is a structural diagnostic; it is not a risk limit by itself.
+
+A two-leg calendar spread with one deferred contract and one nearby contract has zero net level loading only in the idealized log-price representation when the legs are matched in the same currency and unit. Its short-term loading is
+
+$$
+e^{-\kappa\tau_d}-e^{-\kappa\tau_n},
+$$
+
+which is usually negative for a long deferred/short nearby position. A three-leg portfolio is required if the strategy must target both a specified short-term exposure and zero level exposure while also controlling another dimension such as curvature or dollar duration.
+
+The next cell constructs a factor-loading portfolio directly. The resulting weights are normalized in model units; a real order requires a second step that applies contract multipliers, liquidity, margin, and risk limits.
+
+```{python}
+#| label: ch4-factor-neutral-portfolio
+
+tau = np.array([1 / 12, 6 / 12, 12 / 12])
+kappa = 1.10
+short_loading = np.exp(-kappa * tau)
+
+# Rows: level exposure and short-term-factor exposure.
+constraint_matrix = np.vstack([np.ones_like(tau), short_loading])
+target_exposure = np.array([0.0, 1.0])
+
+# Minimum-norm weights satisfying the two factor constraints.
+weights = constraint_matrix.T @ np.linalg.solve(
+    constraint_matrix @ constraint_matrix.T, target_exposure
+)
+
+portfolio = pd.DataFrame(
+    {
+        "time_to_delivery_years": tau,
+        "short_factor_loading": short_loading,
+        "model_weight": weights,
+    }
+)
+
+print("Implied factor exposure:", (constraint_matrix @ weights).round(8))
+portfolio.round(5)
+```
+
+A statistical hedge ratio should be estimated on the P&L of the actual legs, not on visually similar price levels. For a target leg $A$ and hedge leg $B$, the minimum-variance one-period hedge ratio is
+
+$$
+h^*
+=\frac{\operatorname{Cov}(\Delta\Pi_A,\Delta\Pi_B)}
+{\operatorname{Var}(\Delta\Pi_B)},
+$$
+
+where $\Delta\Pi$ includes the contract multiplier and quotation unit. A model-implied factor hedge and a historical minimum-variance hedge answer different questions. The first controls a declared structural exposure; the second controls a sample covariance. Both need scenario and out-of-sample testing.
+
+Most importantly, a factor state is not a signal by itself. A positive short-term deviation could represent temporary scarcity, a risk premium required by hedgers, a delivery-specific dislocation, or a model error. A tradable hypothesis must specify why the factor should change, what instrument expresses the view, the expected horizon, the convergence mechanism, and the costs and risks that remain.
+
+## 8. Validation: statistical fit is not economic usefulness
+
+The model should be evaluated as a chain of claims rather than with one fit statistic.
+
+| Claim | Appropriate diagnostic | Failure interpretation |
+|:--|:--|:--|
+| The model represents the observed curve | Cross-sectional residuals by maturity and delivery month | Missing factor, seasonality, contract mismatch, or measurement noise |
+| The state transition is adequate | Innovation autocorrelation, variance, and tail diagnostics | Misspecified dynamics, jumps, stale marks, or changing liquidity |
+| Parameters are portable | Rolling estimates and crop-era stability | Regime dependence; do not use one global calibration without qualification |
+| The state forecasts prices | Point-in-time physical-measure forecast with benchmark comparison | A good fit under $\mathbb{Q}$ does not establish a return forecast under $\mathbb{P}$ |
+| The state improves a hedge | Out-of-sample currency P&L, drawdown, basis error, and turnover | Factor neutrality may not reduce operational or delivery risk |
+| The state supports derivatives valuation | Option-implied calibration, repricing error, and smile/skew diagnostics | A futures model alone is insufficient for an option book |
+| The portfolio survives stress | Report, weather, limit-move, delivery, liquidity, and correlation scenarios | Gaussian continuous-time assumptions are incomplete in scarcity regimes |
+
+The minimum validation record should preserve the model version, contract panel, parameter estimates, information timestamp, initialization, optimization settings, excluded observations, and all transformations. A later backtest should be able to answer not only “what was the return?” but also “which curve and which physical vintage were available when the position was chosen?”
+
+## Review checkpoint
+
+Before moving to options and volatility, you should be able to answer these questions without relying on a software abstraction:
+
+1. Why is a futures curve a panel of maturity-specific observations rather than one asset?
+2. What is the difference between a physical-measure forecast and a pricing-measure valuation?
+3. Why does $e^{-\kappa\tau}$ create a maturity-dependent exposure to a short-term factor?
+4. Why must an agricultural seasonal component be indexed consistently with the delivery exposure?
+5. What information does a futures panel provide that a rolled nearby series destroys?
+6. Why is a model-implied factor hedge different from a historical minimum-variance hedge?
+7. Which empirical result would falsify the claim that the two-factor representation is useful for a selected market and task?
+
+## Focused reading
+
+- Geman, *Commodities and Commodity Derivatives*, the chapters on stochastic commodity-price models, futures valuation, and agricultural applications [@geman2005].
+- Gibson and Schwartz, “Stochastic Convenience Yield and the Pricing of Oil Contingent Claims,” for the two-factor convenience-yield formulation [@gibsonSchwartz1990].
+- Schwartz, “The Stochastic Behavior of Commodity Prices: Implications for Valuation and Hedging,” for nested one-, two-, and three-factor commodity models [@schwartz1997].
+- Schwartz and Smith, “Short-Term Variations and Long-Term Dynamics in Commodity Prices,” for the level/deviation representation and its futures-panel interpretation [@schwartzSmith2000].
+
+The next chapter will use this state-space foundation to develop options and volatility: Black–76, implied volatility, Greeks, volatility surfaces, and the difference between hedging a futures curve and hedging nonlinear exposure.

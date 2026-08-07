@@ -1,0 +1,290 @@
+---
+title: "Chapter 7 — Risk measurement and stress testing"
+description: "VaR, Expected Shortfall, nonlinear revaluation, and agricultural scenarios that bind a derivatives risk mandate."
+---
+
+```{python}
+#| label: ch7-setup
+#| echo: false
+
+import numpy as np
+import pandas as pd
+```
+
+## Chapter question and learning outcomes
+
+A portfolio can have a respectable historical Sharpe ratio and still be unsafe. Agricultural derivative risk is concentrated in delivery months, basis locations, report releases, weather transitions, limit moves, liquidity gaps, and nonlinear option exposures.
+
+The central question is:
+
+> How should a portfolio manager measure ordinary loss, tail loss, and model-specific loss in a way that actually binds the trading mandate?
+
+This chapter develops:
+
+1. the hierarchy of market, physical, liquidity, and model risk;
+2. Value-at-Risk and Expected Shortfall as conditional loss measures;
+3. parametric, historical, and Monte Carlo approaches;
+4. Greek approximations and full revaluation for options;
+5. agricultural stress scenarios;
+6. portfolio aggregation, limits, and escalation rules.
+
+Risk measurement is not a search for one correct number. It is a controlled set of views about how the portfolio can lose money.
+
+## 1. Risk is a set of mechanisms, not one volatility estimate
+
+For an agricultural derivatives portfolio, the risk inventory should include at least:
+
+| Risk family | Example | Observable portfolio consequence |
+|:--|:--|:--|
+| Outright price risk | Corn futures move against a position | Linear futures P&L |
+| Curve risk | Nearby and deferred contracts move differently | Calendar-spread P&L and roll loss |
+| Basis risk | Local cash and futures converge differently | Hedge error |
+| Volatility risk | Implied volatility or skew reprices | Option vega and surface P&L |
+| Convexity risk | Large move changes delta materially | Gamma P&L and hedge slippage |
+| Event risk | WASDE or weather information gaps the market | Jump loss, volatility repricing |
+| Liquidity risk | Bid–ask widens or depth disappears | Execution loss and inability to exit |
+| Delivery risk | Notice, grade, location, or storage rule binds | Operational and basis exposure |
+| FX and financing risk | Reporting currency or margin funding changes | Currency P&L and collateral pressure |
+| Model risk | State, vol, or hedge model fails | Residual P&L and wrong risk limits |
+
+The risk report should expose these mechanisms separately before presenting a total. A total risk number without attribution can create false reassurance: offsetting risks may cancel in the base covariance estimate and reappear together in a stress.
+
+## 2. VaR and Expected Shortfall are loss functionals
+
+Let $\Delta\Pi_{t+1}$ be the one-period change in portfolio value, including mark-to-market P&L, financing, transaction costs if the horizon includes rebalancing, and FX treatment. At confidence level $\alpha$, define loss as $L_{t+1}=-\Delta\Pi_{t+1}$. Historical Value-at-Risk is
+
+$$
+\mathrm{VaR}_{\alpha}
+=Q_{\alpha}(L),
+$$
+
+or equivalently
+
+$$
+\mathrm{VaR}_{\alpha}
+=-Q_{1-\alpha}(\Delta\Pi).
+$$
+
+Expected Shortfall is the conditional tail mean,
+
+$$
+\mathrm{ES}_{\alpha}
+=\mathbb{E}\left[L\mid L\ge\mathrm{VaR}_{\alpha}\right],
+$$
+
+with a quantile-integral definition used when the distribution is discrete or has atoms. Expected Shortfall answers a question VaR does not: how severe are losses beyond the selected quantile?
+
+Both measures require a horizon and an information set. “One-day VaR” is not meaningful until the report states whether it includes overnight gaps, margin calls, transaction costs, contract rolls, and the portfolio’s actual rebalancing rule.
+
+A historical calculation is transparent but backward-looking. A parametric calculation is efficient but distribution-dependent. A Monte Carlo calculation can express richer dynamics but is only as credible as its calibrated shocks, correlations, jumps, and scenario design.
+
+```{python}
+#| label: ch7-historical-var-es
+
+pnl = np.array(
+    [
+        120_000, -45_000, 75_000, -210_000, 35_000,
+        -80_000, 55_000, -410_000, 95_000, -125_000,
+        40_000, -65_000, 180_000, -95_000, 25_000,
+    ],
+    dtype=float,
+)
+confidence = 0.95
+losses = -pnl
+var = np.quantile(losses, confidence)
+tail_losses = losses[losses >= var]
+expected_shortfall = tail_losses.mean()
+
+risk_summary = pd.DataFrame(
+    {
+        "confidence": [confidence],
+        "historical_var": [var],
+        "historical_es": [expected_shortfall],
+        "tail_observations": [len(tail_losses)],
+    }
+)
+risk_summary.round(2)
+```
+
+A small historical sample can make the tail estimate almost entirely dependent on one observation. That is not a reason to discard the measure; it is a reason to disclose tail-sample uncertainty and complement it with structural stress scenarios.
+
+## 3. Parametric risk is useful only when the factors are credible
+
+For a linear portfolio with return vector $r$ and covariance matrix $\Sigma$, a normal parametric VaR can be written as
+
+$$
+\mathrm{VaR}_{\alpha}
+=-(\mu_p+z_{1-\alpha}\sigma_p),
+\qquad
+\sigma_p=\sqrt{w^{\mathsf T}\Sigma w},
+$$
+
+where $z_{1-\alpha}$ is the standard normal quantile and $\mu_p$ is the expected one-period P&L or return in the selected currency convention.
+
+The formula is not wrong because returns are non-normal; it is a benchmark whose residual risk must be measured. Agricultural returns can exhibit skewness, fat tails, jumps, price limits, and regime-dependent covariance. An ordinary covariance matrix also misses the nonlinear mapping from futures prices and implied volatilities into option P&L.
+
+A factor model can improve interpretability:
+
+$$
+\Delta\Pi
+\approx Bf+\varepsilon,
+$$
+
+where $f$ contains outright, curve, basis, volatility, FX, and event factors. The covariance is then
+
+$$
+\operatorname{Var}(\Delta\Pi)
+\approx B\Sigma_fB^{\mathsf T}+\Sigma_{\varepsilon}.
+$$
+
+This decomposition helps identify whether a risk limit is being used by level exposure, curve exposure, idiosyncratic basis, or residual model error. It does not eliminate estimation error in $B$ or $\Sigma_f$.
+
+## 4. Options require nonlinear and surface-aware revaluation
+
+For a small move, the delta–gamma–vega approximation is
+
+$$
+\Delta V
+\approx
+\Delta\,\Delta F
++\frac{1}{2}\Gamma(\Delta F)^2
++\mathcal{V}\,\Delta\sigma
++\Theta\,\Delta t.
+$$
+
+This is useful for explaining ordinary daily P&L and for rapid scenario screening. It is unsafe for large futures moves, near-expiry options, large volatility shifts, skew moves, or events that alter the forward and volatility surface together.
+
+A risk engine should use a hierarchy:
+
+1. linear sensitivity for a first diagnostic;
+2. delta–gamma–vega for moderate scenarios;
+3. full option revaluation on a futures and volatility-surface grid;
+4. exchange and operational checks for exercise, delivery, limits, and liquidity.
+
+A full revaluation scenario should specify at least:
+
+- the futures move by delivery month;
+- the implied-volatility level move;
+- the skew or smile move;
+- the option time step and expiry treatment;
+- basis and FX shocks;
+- bid–ask and market-impact assumptions.
+
+It is not enough to shock one implied-volatility scalar when the portfolio carries a strike-expiry surface.
+
+## 5. Stress scenarios should express agricultural mechanisms
+
+A stress is not simply “multiply volatility by three”. A useful scenario describes a mechanism and its joint consequences.
+
+| Scenario family | Joint shock design | Risk revealed |
+|:--|:--|:--|
+| Crop shortfall | Nearby futures up, deferred contracts up less, basis strengthens, implied vol rises | Scarcity, curve, basis, and short-gamma risk |
+| Demand or export shock | Outright price down, deferred curve response differs, basis weakens | Fundamental signal and spread risk |
+| WASDE surprise | Immediate contract-month jump, event vol reprices, post-event liquidity changes | Gap and event-option risk |
+| Weather reversal | Nearby volatility rises, correlations change, report timing matters | Volatility surface and hedge instability |
+| Delivery squeeze | Nearby contract dislocates, storage/carry relationship changes, liquidity falls | Delivery, convergence, and basis risk |
+| Limit move | Price shock is capped in the exchange session, exit is delayed | Nonlinearity and liquidation risk |
+| Cross-commodity shock | Corn, soybean, wheat, energy, and FX move with stressed correlations | Diversification failure |
+| Funding shock | Margin or collateral requirement rises while P&L is adverse | Balance-sheet and forced-liquidation risk |
+
+The scenario should be applied to the complete portfolio, not just the instrument that motivated it. A bullish physical view can lose money through a short call, a deferred hedge, a basis mismatch, or a margin call even if the nearby futures direction is correct.
+
+```{python}
+#| label: ch7-joint-scenario
+
+scenario = pd.DataFrame(
+    {
+        "shock": ["ordinary", "crop_shortfall", "delivery_squeeze", "report_gap"],
+        "nearby_move": [0.00, 0.35, 0.50, 0.25],
+        "deferred_move": [0.00, 0.20, 0.08, 0.18],
+        "implied_vol_change": [0.00, 0.08, 0.12, 0.15],
+        "basis_change": [0.00, 0.10, 0.25, 0.05],
+    }
+)
+
+# Simplified portfolio exposures in common currency units.
+nearby_delta = -1_200_000.0
+deferred_delta = 650_000.0
+gamma_currency_per_price2 = -2_500_000.0
+vega_currency_per_vol = -180_000.0
+basis_currency_per_price = -300_000.0
+
+scenario["delta_pnl"] = (
+    nearby_delta * scenario["nearby_move"]
+    + deferred_delta * scenario["deferred_move"]
+)
+scenario["gamma_pnl"] = (
+    0.5 * gamma_currency_per_price2 * scenario["nearby_move"] ** 2
+)
+scenario["vega_pnl"] = (
+    vega_currency_per_vol * scenario["implied_vol_change"]
+)
+scenario["basis_pnl"] = basis_currency_per_price * scenario["basis_change"]
+scenario["total_scenario_pnl"] = scenario[
+    ["delta_pnl", "gamma_pnl", "vega_pnl", "basis_pnl"]
+].sum(axis=1)
+scenario.round(0)
+```
+
+The fixture demonstrates an important point: a portfolio with modest ordinary variance can have a large loss when directional, convexity, volatility, and basis shocks occur together.
+
+## 6. Risk limits must bind decisions
+
+A risk limit is useful only if it changes behaviour before the loss occurs. A desk mandate may include:
+
+- gross and net notional limits;
+- futures-equivalent delta limits by commodity and delivery bucket;
+- curve-factor and basis limits;
+- vega, gamma, and event-volatility limits;
+- VaR and Expected Shortfall limits;
+- stress-loss limits;
+- margin and liquidity limits;
+- concentration and delivery-period limits;
+- drawdown-based de-risking rules.
+
+Limits should be hierarchical. A portfolio may be inside total VaR while violating a nearby basis limit or a short-event-volatility limit. The most constraining limit should be reported, together with the position and mechanism that consumes it.
+
+A risk escalation rule should specify:
+
+1. the threshold;
+2. the measurement time and price source;
+3. who can reduce, hedge, or temporarily exceed the limit;
+4. how the exception is documented;
+5. when normal risk capacity is restored.
+
+Without these rules, a limit is a dashboard colour rather than governance.
+
+## 7. Risk measurement validation
+
+Risk models should be backtested, but a clean VaR exception count is not sufficient. Validation should include:
+
+| Validation | What it tests |
+|:--|:--|
+| VaR exceptions | Whether the quantile forecast is broadly calibrated |
+| Tail severity | Whether Expected Shortfall understates losses beyond VaR |
+| P&L attribution | Whether the stated risk factors explain realised moves |
+| Stress coverage | Whether known agricultural mechanisms are represented |
+| Liquidity review | Whether the assumed exit price was executable |
+| Scenario stability | Whether small parameter changes create absurd risk swings |
+| Model comparison | Whether a simpler benchmark performs similarly |
+| Governance replay | Whether the report can be reconstructed from point-in-time data |
+
+A model that fails a stress test is not necessarily unusable. It may be a useful indicator of a risk that must be capped, hedged, or accepted explicitly. The failure becomes dangerous when the portfolio treats the model as complete.
+
+## Review checkpoint
+
+1. Why is Expected Shortfall informative beyond VaR?
+2. Which agricultural risks disappear when risk is measured only on a continuous nearby series?
+3. When is delta–gamma–vega approximation inadequate?
+4. Why should a report surprise stress futures, implied volatility, basis, and liquidity together?
+5. Which risk limit would bind a short straddle that is delta-neutral?
+6. How can a portfolio be within VaR while violating a delivery or liquidity constraint?
+7. What evidence would justify changing a stress scenario rather than changing the portfolio?
+
+## Focused reading
+
+- Geman (ed.), *Risk Management in Commodity Markets*, for physical-financial risk integration and commodity stress analysis [@geman2008risk].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for portfolio risk and performance measurement [@fabozzi2008].
+- Geman, *Commodities and Commodity Derivatives*, for commodity derivatives risk and option sensitivities [@geman2005].
+
+The next chapter develops the econometric layer used to estimate states, forecasts, volatility, and regime dependence without confusing statistical fit with tradable evidence.

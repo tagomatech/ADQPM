@@ -1,5 +1,5 @@
 ---
-title: "Module 2 — Physical balances, basis, and information timing"
+title: "Chapter 2 — Physical balances, basis, and information timing"
 description: "From agricultural balance sheets to point-in-time tradable hypotheses."
 ---
 
@@ -7,35 +7,21 @@ description: "From agricultural balance sheets to point-in-time tradable hypothe
 #| label: m2-setup
 #| echo: false
 
-from pathlib import Path
-import sys
-
-COURSE_ROOT = Path.cwd()
-SRC = COURSE_ROOT / "src"
-if SRC.exists() and str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agpm.fundamentals import (
-    cash_basis,
-    ending_stocks,
-    latest_vintage_at,
-    release_surprise,
-    stocks_to_use,
-)
-from agpm.futures import CORN
+
 ```
 
-## Scope and learning contract
+## Chapter purpose and learning outcomes
 
-Module 1 defined the dated derivative and the curve. This module adds the physical state variables that make agricultural markets different from generic financial futures: production, stocks, use, exports, basis, crop calendars, and public information releases.
+Chapter 1 defined the dated derivative and the curve. This chapter adds the physical state variables that make agricultural markets different from generic financial futures: production, stocks, use, exports, basis, crop calendars, and public information releases.
 
 The central distinction is between an accounting identity and an economic model. A balance sheet must add up. A low stocks-to-use ratio may be informative about scarcity. Neither fact, by itself, specifies the next futures return. The quantitative task is to construct a point-in-time state estimate, map it to a tradable price object, and evaluate the mapping without using revised or subsequently released information.
 
-By the end of the module, you should be able to:
+By the end of this chapter, you should be able to:
 
 1. construct and audit a crop-year balance sheet in consistent physical units;
 2. distinguish stocks, flows, forecasts, revisions, and vintages;
@@ -81,22 +67,22 @@ balance = pd.DataFrame(
     }
 )
 
-balance["ending_stocks_m_bushels"] = ending_stocks(
-    balance["beginning_stocks_m_bushels"],
-    balance["production_m_bushels"],
-    balance["imports_m_bushels"],
-    balance["domestic_use_m_bushels"],
-    balance["exports_m_bushels"],
-    balance["other_disappearance_m_bushels"],
+balance["ending_stocks_m_bushels"] = (
+    balance["beginning_stocks_m_bushels"]
+    + balance["production_m_bushels"]
+    + balance["imports_m_bushels"]
+    - balance["domestic_use_m_bushels"]
+    - balance["exports_m_bushels"]
+    - balance["other_disappearance_m_bushels"]
 )
 balance
 ```
 
-The calculation is deliberately boring. A balance-sheet function should not forecast, smooth, or infer a price. It should make the conservation equation reproducible and auditable. If a reported table does not reconcile, the discrepancy should be labelled as a residual or data-quality issue rather than hidden inside a model.
+The calculation is deliberately boring. A balance-sheet calculation should not forecast, smooth, or infer a price. It should make the conservation equation reproducible and auditable. If a reported table does not reconcile, the discrepancy should be labelled as a residual or data-quality issue rather than hidden inside a model.
 
-All terms must use the same unit and period. Mixing bushels with metric tonnes, crop years with calendar years, or a revised production estimate with an unrevised use estimate can create a numerically precise but economically meaningless feature. Unit conversions belong in a documented data layer; the balance function should receive normalized inputs.
+All terms must use the same unit and period. Mixing bushels with metric tonnes, crop years with calendar years, or a revised production estimate with an unrevised use estimate can create a numerically precise but economically meaningless feature. Unit conversions belong in a documented data layer; the balance calculation should receive normalized inputs.
 
-## 2. Stocks-to-use is a state descriptor, not a price forecast
+## 2. Stocks-to-use is a state descriptor—not a complete price forecast
 
 Define total use as
 
@@ -110,7 +96,43 @@ $$
 R_t = \frac{S^{E}_t}{T_t}.
 $$
 
-The ratio is dimensionless and allows scale comparison across years. It is often a useful scarcity proxy because a given inventory level is more consequential when expected use is large. It is not, however, a universal structural measure of convenience yield. Quality, location, deliverability, inventory ownership, financing, and expectations all matter.
+The ratio is dimensionless and allows scale comparison across years. It is often a useful scarcity proxy—and a common explanatory variable in agricultural price models—because a given inventory level is more consequential when expected use is large. It is not, however, a universal structural measure of convenience yield. Quality, location, deliverability, inventory ownership, financing, and expectations all matter.
+
+::: {.callout-note}
+## Theory and practice: why practitioners regress price on stocks-to-use
+
+The heading needs a precise qualification. In agricultural markets, practitioners and public institutions do use stocks-to-use relationships to construct conditional price benchmarks. USDA Economic Research Service price models for corn and wheat explicitly use a stocks-to-use framework for price determination and forecasting, while published agricultural-market research has used rolling and report-specific regressions of futures prices on projected stocks-to-use [@westcottHoffman1999; @milacekBrorsen2017]. The practice is therefore consistent with the theory; it answers a different question from a no-arbitrage storage relation.
+
+The theory says that inventory scarcity affects the value of immediate physical availability. In the theory of storage, that scarcity service is represented by convenience yield, which can influence the spot price, nearby basis, and forward curve. Stocks-to-use is an observable, compressed proxy for part of that state. Theory explains why the relationship should often be negative—lower available stocks relative to use tend to be associated with higher prices—but it does not determine the functional form, coefficient, horizon, contract month, risk premium, or regime.
+
+A practitioner fair-value model makes those empirical choices explicit. A stylized version is
+
+$$
+\widehat{\log P^{\mathrm{FV}}_{y,h|v}}
+= \alpha_{m,h}
++ \beta_h \log R_{y|v}
++ \boldsymbol{\gamma}_h^{\mathsf{T}}\mathbf{Z}_{y|v},
+\qquad \beta_h<0,
+$$
+
+where $y$ is a crop or marketing year, $h$ is the price horizon or contract target, $v$ is the information vintage, $R_{y|v}$ is the stocks-to-use forecast available at that vintage, and $\mathbf{Z}_{y|v}$ contains controls such as seasonality, policy, global supply, exchange rates, energy inputs, expected production and use, or cross-commodity relationships. The target $P$ might be a season-average farm price, a nearby futures price after a report, or a specified delivery-month futures price. These are not interchangeable targets.
+
+The model-implied value is a **conditional benchmark**, not an arbitrage-free price. It estimates what the selected price object has tended to be, conditional on a selected information set and sample. A residual,
+
+$$
+e_{t,h}=\log P_{t,h}-\widehat{\log P^{\mathrm{FV}}_{t,h|v}},
+$$
+
+can be used as a relative-value or forecasting feature only if there is a defensible mechanism for convergence, a defined horizon, and adequate compensation for carry, basis, liquidity, model uncertainty, and trading costs. A large residual may instead indicate a structural break, a poor contract mapping, a new policy regime, or an omitted risk premium.
+
+| Layer | Main question | What it does not provide |
+|:--|:--|:--|
+| Theory of storage | How can inventory scarcity affect spot, basis, and the curve? | A unique price from stocks-to-use alone |
+| Fair-value regression | What price is conditionally consistent with the chosen historical model and information vintage? | An arbitrage guarantee or a tradable return |
+| Portfolio signal | Is the residual expected to close at a known horizon after carry and costs? | Certainty that the model will mean-revert |
+
+The implementation boundary matters. The current code computes and audits the ratio; it does not fit a three-row “fair-value” regression. A useful implementation requires a historical vintage panel, a precisely defined price target, walk-forward estimation, uncertainty estimates, and a contract-level mapping. Those requirements are why the regression belongs in the research layer rather than being presented as a decorative extension of the accounting calculation.
+:::
 
 ```{python}
 balance["total_use_m_bushels"] = (
@@ -118,14 +140,13 @@ balance["total_use_m_bushels"] = (
     + balance["exports_m_bushels"]
     + balance["other_disappearance_m_bushels"]
 )
-balance["stocks_to_use"] = stocks_to_use(
-    balance["ending_stocks_m_bushels"],
-    balance["total_use_m_bushels"],
+balance["stocks_to_use"] = (
+    balance["ending_stocks_m_bushels"] / balance["total_use_m_bushels"]
 )
 balance[["marketing_year", "ending_stocks_m_bushels", "total_use_m_bushels", "stocks_to_use"]]
 ```
 
-The economic interpretation must be conditional. A low ratio can coincide with backwardation, a stronger nearby basis, and high implied volatility, but it can also coexist with a weak price if demand is being revised down or if the scarcity is already reflected in the curve. A balance-sheet feature should therefore be compared with the contemporaneous futures curve, basis, volatility, and market expectation—not treated as an isolated directional signal.
+The economic interpretation must be conditional. A low ratio can coincide with backwardation, a stronger nearby basis, and high implied volatility, but it can also coexist with a weak price if demand is being revised down or if the scarcity is already reflected in the curve. In a practitioner model, the relevant question is whether the ratio implies a price different from the current price after conditioning on the contemporaneous futures curve, basis, volatility, market expectation, and model regime—not whether the ratio has a universal directional sign.
 
 A simple visualization is useful for inspecting the state space, but it is not evidence of a stable relation:
 
@@ -151,7 +172,7 @@ The natural research comparison is often not the level of $R_t$ but its change, 
 
 ## 3. Physical state and the forward curve
 
-Module 1 introduced the stylized storage relation
+Chapter 1 introduced the stylized storage relation
 
 $$
 F(t,T) = S_t\exp\left((r+c-y)(T-t)\right),
@@ -162,12 +183,15 @@ where $r$ is financing, $c$ is storage and insurance cost, and $y$ is convenienc
 A useful conceptual decomposition is:
 
 $$
-\text{observed deferred-nearby price difference}
-= \text{financing} + \text{storage} - \text{scarcity service}
-+ \text{risk premium} + \text{measurement error}.
+\begin{aligned}
+\underbrace{F_d-F_n}_{\text{observed spread}}
+&\approx \text{financing}+\text{storage}\\
+&\quad-\text{scarcity service}+\text{risk premium}\\
+&\quad+\text{measurement error}.
+\end{aligned}
 $$
 
-This is not an identity with directly observable components. It is a research map. Storage costs may be nonlinear; inventories may be unavailable to the marginal buyer; the cash price may contain location and quality premia; and the risk premium can vary through time. A regression of a spread on stocks-to-use should therefore be interpreted as a reduced-form relation whose stability must be tested across crop years and regimes.
+Here $F_n$ and $F_d$ denote the nearby and deferred futures prices for the selected pair. The approximation sign is deliberate: only the left-hand spread is directly observed; the right-hand components are a research map, not separately identified accounting terms. Storage costs may be nonlinear; inventories may be unavailable to the marginal buyer; the cash price may contain location and quality premia; and the risk premium can vary through time. A regression of a spread on stocks-to-use should therefore be interpreted as a reduced-form relation whose stability must be tested across crop years and regimes.
 
 The practical object is a joint panel. At each decision timestamp, preserve the physical vintage, the futures contracts, the delivery dates, the local cash price, and the market expectation that was observable at that time. Only then can the curve be used to ask whether a fundamental change was already priced.
 
@@ -190,7 +214,7 @@ The final net price depends on the basis at the time the physical sale is made. 
 
 This is why a successful futures directional forecast is not necessarily a successful physical hedge, and why a basis model can add value even when the futures level is difficult to forecast. The relevant risk is often the change in basis, together with contract mismatch, location, grade, timing, liquidity, and execution costs.
 
-The VSR example in Module 1 is a useful reminder that basis and convergence cannot always be analysed independently of exchange design. In deliverable wheat, a rule governing certificate storage charges can move part of the convergence economics into calendar spreads. A basis model should therefore retain the applicable delivery rule, contract month, grade, location, and observation window as state variables rather than treating convergence as a purely statistical tendency.
+The VSR example in Chapter 1 is a useful reminder that basis and convergence cannot always be analysed independently of exchange design. In deliverable wheat, a rule governing certificate storage charges can move part of the convergence economics into calendar spreads. A basis model should therefore retain the applicable delivery rule, contract month, grade, location, and observation window as state variables rather than treating convergence as a purely statistical tendency.
 
 ```{python}
 hedge = pd.DataFrame(
@@ -200,7 +224,8 @@ hedge = pd.DataFrame(
         "december_futures": [4.20, 4.22, 4.25, 4.24, 4.27],
     }
 )
-hedge["basis"] = cash_basis(hedge["local_cash"], hedge["december_futures"])
+hedge["basis"] = hedge["local_cash"] - hedge["december_futures"]
+hedge["basis_change"] = hedge["basis"].diff()
 hedge
 ```
 
@@ -239,15 +264,23 @@ vintages = pd.DataFrame(
     }
 )
 
-available_before_september_report = latest_vintage_at(
-    vintages,
-    "2026-09-01 12:00",
-    keys=["marketing_year"],
+def latest_available_vintage(frame, decision_time):
+    """Apply the point-in-time filter, then retain the latest vintage per year."""
+    available = frame.loc[
+        frame["release_time"] <= pd.Timestamp(decision_time)
+    ].copy()
+    return (
+        available.sort_values(["marketing_year", "release_time"])
+        .drop_duplicates("marketing_year", keep="last")
+        .sort_values("marketing_year")
+        .reset_index(drop=True)
+    )
+
+available_before_september_report = latest_available_vintage(
+    vintages, "2026-09-01 12:00"
 )
-available_after_september_report = latest_vintage_at(
-    vintages,
-    "2026-09-12 12:00",
-    keys=["marketing_year"],
+available_after_september_report = latest_available_vintage(
+    vintages, "2026-09-12 12:00"
 )
 
 available_before_september_report, available_after_september_report
@@ -268,7 +301,7 @@ where $A_t$ is the released observation and $E_t$ is the expectation observable 
 ```{python}
 reported_stocks = 1_750
 market_expectation = 1_840
-surprise = release_surprise(reported_stocks, market_expectation)
+surprise = reported_stocks - market_expectation
 pd.DataFrame(
     {
         "reported_stocks_m_bushels": [reported_stocks],
@@ -327,13 +360,17 @@ You should be able to answer these without looking at the code:
 6. Give two reasons why a basis model can be valuable even if outright futures returns are difficult to forecast.
 7. What changes when a physical signal is mapped to a calendar spread instead of an outright contract?
 8. Which part of the table above is an economic assumption rather than an accounting identity?
+9. Why can a regression of price on stocks-to-use be useful without being an arbitrage-free valuation equation?
+10. Which price target, information vintage, controls, and convergence mechanism would be required before trading a stocks-to-use residual?
 
 ## Focused reading
 
 - Geman, *Commodities and Commodity Derivatives*, Chapters 1–3, for storage, convenience yield, and the relationship between physical availability and derivative prices [@geman2005].
 - Working, “The Theory of the Price of Storage,” for the economics of storage and the interpretation of futures spreads [@working1949].
 - Borovkova and Geman in *Risk Management in Commodity Markets*, Chapter 2, for curve factors, seasonality, and commodity-specific modelling [@geman2008risk].
+- USDA Economic Research Service, *Price Determination for Corn and Wheat*, for an institutional stocks-to-use price-response framework and its limitations [@westcottHoffman1999].
+- Milacek and Brorsen, “Trading Based on Knowing the WASDE Report in Advance,” for report-specific futures-price regressions, structural change, and the gap between a price forecast and a tradable return [@milacekBrorsen2017].
 - USDA WASDE documentation for the structure and release timing of agricultural balance estimates [@usdaWasde].
 - CFTC COT documentation for report timing, positioning categories, and the distinction between reportable derivatives positions and the physical market [@cftcCot].
 
-The next module will use these physical and information-set objects to study agricultural seasonality, basis dynamics, and robust signal construction before moving to options and volatility.
+The next chapter will use these physical and information-set objects to study agricultural seasonality, basis dynamics, and robust signal construction before moving to options and volatility.

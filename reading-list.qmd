@@ -11,18 +11,32 @@ This is a working source map rather than a reading list to complete before study
 - Working, “The Theory of the Price of Storage”: the inventory and convenience-yield logic underlying the theory of storage [@working1949].
 - Kaldor, “Speculation and Economic Stability”: the classic discussion of normal backwardation, inventories, and speculative markets [@kaldor1939].
 
+## Stochastic dynamics and derivative valuation {.unnumbered}
+
+- Gibson and Schwartz, “Stochastic Convenience Yield and the Pricing of Oil Contingent Claims”: a two-factor pricing model linking spot and convenience yield [@gibsonSchwartz1990].
+- Schwartz, “The Stochastic Behavior of Commodity Prices: Implications for Valuation and Hedging”: nested one-, two-, and three-factor models and their valuation and hedge implications [@schwartz1997].
+- Schwartz and Smith, “Short-Term Variations and Long-Term Dynamics in Commodity Prices”: a long-term level/short-term deviation model expressed directly through the futures curve [@schwartzSmith2000].
 ## Risk, curves, and portfolio management {.unnumbered}
 
 - Geman (ed.), *Risk Management in Commodity Markets*: forward-curve modelling, physical/financial risk integration, portfolio hedging, structural breaks, and commodity-derivatives risk management [@geman2008risk].
 - Fabozzi, Füss, and Kaiser (eds.), *The Handbook of Commodity Investing*: futures economics, performance measurement, portfolio risk, forecasting, systematic strategies, options, and agricultural fundamentals [@fabozzi2008].
 
+## Options and volatility {.unnumbered}
+
+- Black, “The Pricing of Commodity Contracts”: the benchmark futures-option valuation formula and its assumptions [@black1976].
+- Geman, *Commodities and Commodity Derivatives*, the chapters on option valuation, volatility, and spread options [@geman2005].
 ## Market and data conventions {.unnumbered}
 
 - CME Group, Corn futures product overview: contract size, quotation convention, tick size, and contract mechanics [@cmeCorn].
 - CME Group, Variable Storage Rates and FAQ: the exchange-specific storage-charge rule, financial full carry, calendar-spread triggers, and cash–futures convergence in physically delivered wheat [@cmeVsr; @cmeVsrFaq].
+- Milacek and Brorsen, “Trading Based on Knowing the WASDE Report in Advance”: an empirical example of report-specific stocks-to-use price forecasting and trading evaluation [@milacekBrorsen2017].
 - USDA, WASDE documentation: publication context for supply-and-use estimates and revisions [@usdaWasde].
 - U.S. CFTC, Commitments of Traders reports: report timing, categories, and position data conventions [@cftcCot].
 
+## Backtesting and research governance {.unnumbered}
+
+- Bailey et al., “The Deflated Sharpe Ratio”: selection bias, non-normality, and the interpretation of backtest performance [@bailey2014].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for performance measurement, forecasting, and systematic commodity research [@fabozzi2008].
 ## How sources are used {.unnumbered}
 
 A source can provide a definition, a model, an empirical result, a market convention, or a hypothesis. Those roles will be kept distinct. Older theoretical sources remain valuable, but current exchange specifications, reporting conventions, data availability, and execution assumptions must be checked again when an application is built.

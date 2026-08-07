@@ -10,7 +10,11 @@ From this directory:
 quarto render
 ```
 
-The public HTML book is written to `course/_site/index.html`. Equations are emitted as server-generated MathML, so inline and display formulas do not depend on a browser connection to a math CDN. The current validated snapshot can be opened directly at `course/_site-final/index.html`.
+The public HTML book is written to `_site/index.html`. Equations are converted to static KaTeX during the post-render step, so inline and display formulas do not depend on a browser connection to a math CDN. For a live local version while editing, run:
+
+```powershell
+quarto preview
+```
 
 ## Private Bloomberg companion
 

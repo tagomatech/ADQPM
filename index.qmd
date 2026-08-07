@@ -31,7 +31,19 @@ Bloomberg connectivity, proprietary observations, and terminal-specific exercise
 
 ## How to study the book {.unnumbered}
 
-Read the definitions and derivations before expanding the code. Treat every code cell as an executable specification of a market object or accounting identity. For each empirical result, ask what was observable at the decision time, what was estimated, what was tradable, what it cost, and which failure modes remain.
+Read the definitions and derivations before expanding the code. The public code cells are deliberately selective: they show the financial transformation, estimation logic, or validation procedure that the reader should understand. Thin framework calls, object representations, and routine plumbing remain tested in the companion implementation but are not presented as lessons. For each empirical result, ask what was observable at the decision time, what was estimated, what was tradable, what it cost, and which failure modes remain.
+
+## The code is an executable argument {.unnumbered}
+
+The standard for code in this book is not “can the library perform this operation?” It is “does the cell make a financial or research assumption inspectable?” A useful cell should expose at least one of the following:
+
+- a unit conversion, P&L identity, or cash-flow mapping;
+- a transformation from market data into a defined state variable;
+- an estimation procedure and its information set;
+- a position, cost, risk, or performance calculation;
+- a diagnostic that can falsify an assumption.
+
+Framework functions are used underneath to support tests and reusable applications. In the narrative, their logic is shown directly whenever hiding it would obscure the concept. More advanced implementation abstractions will appear only after the reader has seen the underlying equation and research decision.
 
 ## Curriculum map {.unnumbered}
 
@@ -40,12 +52,12 @@ Read the definitions and derivations before expanding the code. Treat every code
 | 1. Instruments and curves | What exactly is being traded, delivered, marked, and rolled? | CBOT corn contract months and calendar spreads |
 | 2. Commodity economics and fundamentals | How do stocks, flows, weather, policy, and logistics enter prices? | WASDE balances, crop progress, basis, storage |
 | 3. Statistical market research | Which signals survive timing controls, costs, regimes, and multiple testing? | Seasonality, curve carry, momentum, positioning, inter-commodity spreads |
-| 4. Options and volatility | How are nonlinear exposures priced, hedged, and stress-tested? | Black-76, implied volatility, skew, report/event risk |
+| 4. Stochastic models, options, and volatility | How are curve states and nonlinear exposures priced, hedged, and stress-tested? | State-space curve models, Black-76, implied volatility, skew, report/event risk |
 | 5. Portfolio construction and risk | How are heterogeneous trades combined under limits? | Futures, spreads, options, cross-commodity and cross-crop risk |
 | 6. Research implementation | How does a hypothesis become a tested and monitored process? | Contract panels, public data, private adapters, attribution, model governance |
 
-Module 1 establishes the contract-level and forward-curve language. Module 2 adds physical balances, basis, and point-in-time information sets so that agricultural fundamentals can be translated into testable price hypotheses. Module 3 adds seasonality, basis dynamics, and rigorous signal validation. Subsequent modules will add stochastic models, options, portfolio construction, and risk.
+Chapter 1 establishes the contract-level and forward-curve language. Chapter 2 adds physical balances, basis, and point-in-time information sets so that agricultural fundamentals can be translated into testable price hypotheses. Chapter 3 adds seasonality, basis dynamics, and rigorous signal validation. Chapter 4 introduces stochastic commodity-price and futures-curve models as the bridge to derivative valuation, options, and volatility. Chapter 5 develops Black–76, implied volatility, Greeks, volatility surfaces, and nonlinear event risk. Chapters 6–9 develop portfolio construction, risk measurement, econometrics, backtesting, attribution, and governance. Chapter 10 integrates the framework in a corn derivatives portfolio case.
 
 ## Current public scope {.unnumbered}
 
-Module 1 establishes the contract-level and forward-curve language. Module 2 develops physical balances, basis, and point-in-time information sets. Module 3 develops seasonality, basis dynamics, and rigorous signal validation. Subsequent modules will add stochastic models, options, portfolio construction, and risk. The selected reading and source map appears after the current modules and will evolve with the book.
+Chapter 1 establishes the contract-level and forward-curve language. Chapter 2 develops physical balances, basis, and point-in-time information sets. Chapter 3 develops seasonality, basis dynamics, and rigorous signal validation. Chapter 4 develops stochastic commodity-price and futures-curve models. Chapter 5 develops options, implied volatility, and nonlinear agricultural risk. Chapters 6–9 develop portfolio construction, risk measurement, econometrics, backtesting, attribution, and governance. Chapter 10 integrates the framework in a corn derivatives portfolio case. The selected reading and source map appears after the current chapters and will evolve with the book.

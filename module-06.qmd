@@ -1,0 +1,388 @@
+---
+title: "Chapter 6 — Portfolio construction and risk budgeting"
+description: "How futures, spreads, and options become a managed agricultural derivatives portfolio under explicit risk and liquidity constraints."
+---
+
+```{python}
+#| label: ch6-setup
+#| echo: false
+
+import numpy as np
+import pandas as pd
+```
+
+## Chapter question and learning outcomes
+
+A collection of signals is not a portfolio. A portfolio is a set of positions whose joint P&L, liquidity, margin, and stress behaviour are managed against a mandate.
+
+The central question is:
+
+> How should heterogeneous agricultural derivative positions be sized and combined when their returns, curve exposures, nonlinear risks, liquidity, and physical delivery obligations interact?
+
+This chapter develops the portfolio layer:
+
+1. positions and risk units;
+2. covariance estimation and estimation error;
+3. risk contributions and risk budgets;
+4. constraints, leverage, margin, and liquidity;
+5. volatility targeting and fractional Kelly sizing;
+6. portfolio construction for options and factor exposures;
+7. validation of a risk budget before capital is committed.
+
+The chapter does not present mean–variance optimization as a magic allocator. It treats optimization as a constrained expression of economic views, risk estimates, and implementation limits.
+
+## 1. The portfolio is a P&L map, not a list of tickers
+
+Let $q_{i,t}$ be the signed number of contracts held in instrument $i$, $M_i$ its multiplier, and $\Delta p_{i,t+1}$ its price change in quoted price units. For a linear futures position,
+
+$$
+\Delta\Pi_{i,t+1}
+=q_{i,t}M_i\Delta p_{i,t+1}.
+$$
+
+For a calendar spread, the instrument is already a portfolio of legs. If the position is $q_s$ spreads with deferred leg $d$ and nearby leg $n$,
+
+$$
+\Delta\Pi_{s,t+1}
+=q_sM\left(\Delta F_{d,t+1}-\Delta F_{n,t+1}\right),
+$$
+
+subject to the sign convention declared when the trade is opened. For an option book, a local approximation is
+
+$$
+\Delta\Pi_{o,t+1}
+\approx Mq_o\left(
+\Delta\,\Delta F
++\frac{1}{2}\Gamma(\Delta F)^2
++\mathcal{V}\,\Delta\sigma
++\Theta_{\mathrm{clock}}\Delta t
+\right).
+$$
+
+A portfolio risk model must therefore aggregate comparable P&L units. Raw price volatility, bushel volatility, ticks, option vega, and margin are not interchangeable capital weights.
+
+A useful instrument record contains at least:
+
+| Field | Portfolio use |
+|:--|:--|
+| Commodity and delivery month | Identifies physical and curve exposure |
+| Instrument type and option terms | Determines linear or nonlinear P&L |
+| Signed quantity and multiplier | Converts a quote move into currency P&L |
+| Currency and FX treatment | Defines the reporting currency |
+| Liquidity and market-impact estimate | Limits executable size |
+| Margin and collateral rule | Constrains balance-sheet usage |
+| Delivery and exercise terms | Defines operational and tail risk |
+| Model and data vintage | Makes the risk estimate reproducible |
+
+The first implementation should calculate the P&L map explicitly. The framework may later store this map in reusable portfolio objects, but the educational object is the conversion itself.
+
+```{python}
+#| label: ch6-position-pnl-map
+
+positions = pd.DataFrame(
+    {
+        "instrument": ["CBOT corn Sep", "CBOT corn Dec/ Sep spread", "corn ATM call"],
+        "position": [4, -3, -10],
+        "multiplier": [5_000, 5_000, 5_000],
+        "price_change": [0.06, -0.025, 0.04],
+        "delta": [1.0, 1.0, 0.52],
+        "gamma": [0.0, 0.0, 0.18],
+        "vega": [0.0, 0.0, 0.08],
+        "vol_change": [0.0, 0.0, 0.015],
+        "theta_per_day": [0.0, 0.0, -0.0018],
+    }
+)
+positions["linear_pnl"] = (
+    positions["position"]
+    * positions["multiplier"]
+    * positions["price_change"]
+)
+positions["option_local_pnl"] = positions["position"] * positions["multiplier"] * (
+    positions["delta"] * positions["price_change"]
+    + 0.5 * positions["gamma"] * positions["price_change"] ** 2
+    + positions["vega"] * positions["vol_change"]
+    + positions["theta_per_day"]
+)
+positions["selected_pnl"] = np.where(
+    positions["instrument"].str.contains("call"),
+    positions["option_local_pnl"],
+    positions["linear_pnl"],
+)
+positions[["instrument", "selected_pnl"]].round(2)
+```
+
+The option example is intentionally a local-risk fixture, not a production valuation. The column names make the important limitation visible: a portfolio can be approximately mapped by Greeks, but a real risk engine must revalue the option under a scenario grid.
+
+## 2. Covariance is an estimate with a failure mode
+
+For a vector of strategy or instrument returns $r_t$ and portfolio weights $w$, the conditional variance estimate is
+
+$$
+\widehat{\sigma}_p^2=w^{\mathsf T}\widehat{\Sigma}w.
+$$
+
+The sample covariance matrix is often unstable when the number of instruments or strategies is not small relative to the history. Agricultural returns also exhibit changing correlations across crop years, energy shocks, policy regimes, and scarcity events. A matrix that is positive definite in one sample can produce implausible portfolio weights in another.
+
+A simple shrinkage estimator is
+
+$$
+\widehat{\Sigma}_{\lambda}
+=(1-\lambda)\widehat{\Sigma}_{\mathrm{sample}}
++\lambda F,
+\qquad 0\le\lambda\le1,
+$$
+
+where $F$ is a structured target, such as a diagonal matrix, a constant-correlation matrix, or a factor-implied covariance. The shrinkage intensity should be estimated or justified out of sample; it should not be selected merely because it makes the backtest smoother.
+
+```{python}
+#| label: ch6-covariance-shrinkage
+
+# Deterministic returns fixture: columns are outright, calendar spread,
+# and an option strategy return series.
+returns = np.array(
+    [
+        [0.010, 0.006, -0.004],
+        [-0.008, 0.002, 0.005],
+        [0.014, -0.004, 0.009],
+        [-0.006, 0.008, -0.007],
+        [0.003, 0.001, 0.002],
+        [0.009, -0.005, 0.006],
+    ]
+)
+
+sample_covariance = np.cov(returns, rowvar=False, ddof=1)
+target_covariance = np.diag(np.diag(sample_covariance))
+shrinkage = 0.50
+shrunk_covariance = (
+    (1 - shrinkage) * sample_covariance
+    + shrinkage * target_covariance
+)
+
+covariance_comparison = pd.DataFrame(
+    shrunk_covariance,
+    index=["outright", "spread", "option"],
+    columns=["outright", "spread", "option"],
+)
+covariance_comparison.round(8)
+```
+
+The data design matters as much as the estimator. Covariance should be estimated on the return or P&L object that will be used for sizing, with the same roll, option-mark, currency, and timestamp conventions. A covariance of generic continuous corn returns is not automatically the covariance of a September/December spread or a report-week straddle.
+
+## 3. Risk contributions create an explicit budget
+
+For linear weights $w$ and covariance matrix $\Sigma$, portfolio volatility is
+
+$$
+\sigma_p=\sqrt{w^{\mathsf T}\Sigma w}.
+$$
+
+The marginal contribution of instrument $i$ to portfolio volatility is
+
+$$
+\mathrm{MRC}_i
+=\frac{(\Sigma w)_i}{\sigma_p},
+$$
+
+and its total risk contribution is
+
+$$
+\mathrm{RC}_i=w_i\mathrm{MRC}_i.
+$$
+
+The contributions add to total volatility,
+
+$$
+\sum_i\mathrm{RC}_i=\sigma_p,
+$$
+
+when the portfolio is represented in compatible linear units. Risk parity seeks approximately equal contributions; a risk budget assigns explicit target fractions $b_i$ such that
+
+$$
+\mathrm{RC}_i\approx b_i\sigma_p,
+\qquad
+\sum_i b_i=1.
+$$
+
+Equal risk is not automatically the correct risk. A physical basis strategy may deserve less risk capital than a liquid outright strategy because its residual risk is harder to hedge. An option strategy may have a small daily variance contribution and a large stressed contribution. Risk budgeting makes the decision explicit; it does not make the decision objective.
+
+```{python}
+#| label: ch6-risk-contributions
+
+weights = np.array([0.40, 0.35, 0.25])
+covariance = shrunk_covariance
+portfolio_volatility = np.sqrt(weights @ covariance @ weights)
+marginal_contribution = covariance @ weights / portfolio_volatility
+risk_contribution = weights * marginal_contribution
+risk_fraction = risk_contribution / portfolio_volatility
+
+risk_budget = pd.DataFrame(
+    {
+        "weight": weights,
+        "marginal_risk": marginal_contribution,
+        "risk_contribution": risk_contribution,
+        "risk_fraction": risk_fraction,
+    },
+    index=["outright", "spread", "option"],
+)
+print("Portfolio volatility:", round(portfolio_volatility, 6))
+risk_budget.round(6)
+```
+
+For an option portfolio, linear covariance is incomplete. A practical construction can use a hybrid risk vector:
+
+$$
+\mathbf{z}
+=\begin{bmatrix}
+\text{linear P\&L factors}\\
+\text{delta exposures}\\
+\text{vega exposures}\\
+\text{scenario losses}
+\end{bmatrix},
+$$
+
+and allocate risk against both ordinary covariance and a scenario-loss budget. The scenario component prevents a short-gamma book from appearing harmless merely because its recent daily returns were quiet.
+
+## 4. Optimization is a constrained expression of views
+
+The classical mean–variance problem is often written as
+
+$$
+\max_w
+\left(
+\mu^{\mathsf T}w
+-\frac{\gamma}{2}w^{\mathsf T}\Sigma w
+\right),
+$$
+
+subject to leverage, liquidity, and other constraints. Its unconstrained solution is fragile because small errors in $\mu$ and $\Sigma$ can create large offsetting positions. In agricultural markets, expected return estimates are especially uncertain because crop years and policy regimes are few.
+
+A more defensible workflow is:
+
+1. define the tradable instruments and their P&L map;
+2. estimate covariance with a stability control;
+3. express fundamental or quantitative views as bounded expected returns or relative-value constraints;
+4. impose gross, net, liquidity, margin, delivery, and scenario limits;
+5. compare the optimized portfolio with simple benchmarks;
+6. reject solutions whose economic interpretation cannot be explained.
+
+Black–Litterman-style methods combine a prior return vector with views. In one common notation,
+
+$$
+\mu_{\mathrm{BL}}
+=\left[(\tau\Sigma)^{-1}+P^{\mathsf T}\Omega^{-1}P\right]^{-1}
+\left[(\tau\Sigma)^{-1}\pi+P^{\mathsf T}\Omega^{-1}q\right],
+$$
+
+where $\pi$ is the prior, $P$ maps assets into view portfolios, $q$ contains view returns, and $\Omega$ represents view uncertainty. In a commodity portfolio there is no universal market-capitalization prior comparable to the equity case. The prior must therefore be economically declared—for example, a neutral curve-factor return or a carry-adjusted benchmark—and its uncertainty must be taken seriously.
+
+A useful portfolio optimization can be less ambitious than “forecast every return”. It can instead minimize risk subject to:
+
+- a desired exposure to a curve or physical factor;
+- a maximum basis or delivery exposure;
+- a minimum liquidity score;
+- a cap on short-gamma or short-event-volatility risk;
+- a total risk budget and a drawdown response rule.
+
+That is closer to how a derivatives desk turns research views into risk-bearing positions.
+
+## 5. Sizing: volatility target, Kelly bound, and implementation limits
+
+If a strategy has forecast volatility $\widehat{\sigma}_{t+1}$ and the portfolio target is $\sigma^*$, a basic volatility-target scale is
+
+$$
+\alpha_t=\frac{\sigma^*}{\widehat{\sigma}_{t+1}},
+$$
+
+subject to leverage, margin, liquidity, and concentration caps. The forecast must be point-in-time. A volatility target based on a full-sample standard deviation is descriptive, not an executable sizing rule.
+
+For a single strategy with expected excess return $\mu$ and variance $\sigma^2$, the frictionless Kelly fraction is
+
+$$
+ f^*=\frac{\mu}{\sigma^2}.
+$$
+
+For multiple strategies, the analogous vector is $w^*=\Sigma^{-1}\mu$. These formulas are highly sensitive to expected-return error and distributional assumptions. Fractional Kelly is therefore a risk-control choice, not a proof that the estimated edge is real. In practice, a small fraction combined with hard exposure and drawdown limits is more defensible than unconstrained Kelly sizing.
+
+```{python}
+#| label: ch6-sizing-controls
+
+forecast_volatility = np.array([0.18, 0.24, 0.31])
+target_volatility = 0.10
+raw_scale = target_volatility / forecast_volatility
+max_scale = np.array([0.75, 0.60, 0.40])
+implemented_scale = np.minimum(raw_scale, max_scale)
+
+sizing = pd.DataFrame(
+    {
+        "forecast_volatility": forecast_volatility,
+        "raw_vol_target_scale": raw_scale,
+        "implementation_cap": max_scale,
+        "implemented_scale": implemented_scale,
+    },
+    index=["outright", "calendar spread", "event option"],
+)
+sizing.round(4)
+```
+
+The cap is not an arbitrary nuisance. It represents the fact that a strategy can be statistically attractive but operationally unscalable. A portfolio manager should record whether a position is limited by risk, margin, market depth, exchange limits, delivery capacity, or internal governance.
+
+## 6. Futures, options, and physical information must share a risk language
+
+The portfolio layer needs a translation between different research objects:
+
+| Research object | Portfolio translation | Residual risk |
+|:--|:--|:--|
+| Stocks-to-use signal | Directional futures or spread exposure | Forecast revision and risk premium |
+| Basis forecast | Local cash/futures hedge ratio | Location, grade, logistics, and delivery mismatch |
+| Curve factor | Outright, calendar, or multi-leg portfolio | Contract-specific curvature and roll risk |
+| Implied-volatility view | Option position and Greek vector | Smile motion, jumps, liquidity, and model error |
+| Event forecast | Defined-risk option structure | Gap, post-event volatility crush, and execution |
+| Cross-commodity relationship | Spread or ratio with conversion units | Processing margin, correlation break, and basis |
+
+The correct position size is not determined by signal strength alone. It is determined by the expected P&L distribution after translating the signal into an instrument, applying a hedge ratio, assigning a risk budget, and imposing the risks that the covariance model does not capture.
+
+A useful desk-level portfolio record should preserve, at each decision timestamp:
+
+1. the view and its information vintage;
+2. the instrument mapping and contract terms;
+3. the target exposure and risk budget;
+4. the covariance and scenario assumptions;
+5. the executed quantity, price, and costs;
+6. the intended exit or rebalancing rule;
+7. the realized P&L and attribution.
+
+This record is the bridge between quantitative research and portfolio management. Without it, a backtest can report returns but cannot explain whether the portfolio carried the intended risk.
+
+## 7. Validation of a risk budget
+
+A portfolio construction method should pass several tests before being trusted:
+
+| Test | Question |
+|:--|:--|
+| Unit test | Does one tick or one volatility point produce the correct currency P&L? |
+| Factor test | Do declared level, slope, basis, and volatility exposures match the position map? |
+| Estimation test | Are covariance and volatility forecasts stable across windows and crop years? |
+| Constraint test | Can every position be executed, margined, and liquidated under the mandate? |
+| Scenario test | Does the portfolio remain within acceptable loss and liquidity limits under joint shocks? |
+| Out-of-sample test | Does the sizing rule improve risk-adjusted P&L after costs rather than merely smooth history? |
+| Governance test | Can the portfolio be reconstructed from the information available at the decision time? |
+
+The output of portfolio construction is not “the optimizer says buy 17 contracts”. It is a documented exposure decision with a risk budget, a range of plausible P&L outcomes, and a known set of failure modes.
+
+## Review checkpoint
+
+1. Why must covariance be estimated on the actual tradable P&L object?
+2. What is the difference between a weight, a dollar exposure, a futures-equivalent delta, and a risk contribution?
+3. Why can equal risk contribution be economically inappropriate?
+4. Which risks are invisible to a linear covariance matrix for a short-option book?
+5. Why should Kelly sizing be treated as an upper bound rather than a default allocation?
+6. Which constraint would bind first for a selected corn strategy: risk, margin, liquidity, delivery, or model uncertainty?
+7. What evidence would justify increasing a strategy’s risk budget?
+
+## Focused reading
+
+- Geman, *Commodities and Commodity Derivatives*, the chapters on portfolio hedging and commodity risk management [@geman2005].
+- Geman (ed.), *Risk Management in Commodity Markets*, for physical-financial integration and portfolio risk [@geman2008risk].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for futures portfolio construction and performance measurement [@fabozzi2008].
+
+The next chapter turns the portfolio map into a risk-measurement system: VaR, Expected Shortfall, nonlinear revaluation, and agricultural stress scenarios.

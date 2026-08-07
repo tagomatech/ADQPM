@@ -1,0 +1,296 @@
+---
+title: "Chapter 8 — Econometrics and dynamic forecasting"
+description: "Time-series models for agricultural states, spreads, volatility, and regimes under point-in-time research controls."
+---
+
+```{python}
+#| label: ch8-setup
+#| echo: false
+
+import numpy as np
+import pandas as pd
+```
+
+## Chapter question and learning outcomes
+
+A quantitative agricultural strategy needs more than a signal definition. It needs a statistical statement about persistence, uncertainty, regime dependence, and forecast error.
+
+The central question is:
+
+> Which econometric structures are useful for estimating agricultural states and forecasts, and how can they be tested without turning historical fit into false trading confidence?
+
+This chapter treats econometrics as a disciplined research layer:
+
+1. choose the stationary object and preserve the economic unit;
+2. estimate persistence and mean reversion with exact timing;
+3. distinguish correlation from cointegration and hedgeability;
+4. model volatility as conditional and state-dependent;
+5. use regimes and state-space models without hindsight;
+6. apply machine learning only after strong economic and statistical benchmarks;
+7. translate a forecast distribution into a cost-aware position.
+
+The models are tools for a hypothesis. None of them creates an economic mechanism by itself.
+
+## 1. Choose the object before choosing the estimator
+
+For a futures contract or spread, common objects include:
+
+- price level $F_{i,t}$;
+- log price $\log F_{i,t}$;
+- simple return $F_{i,t}/F_{i,t-1}-1$;
+- log return $\log F_{i,t}-\log F_{i,t-1}$;
+- basis $B_t=P_t^{\mathrm{cash}}-F_t$;
+- calendar spread $S_t=F_{d,t}-F_{n,t}$;
+- log spread or relative value $\log F_{d,t}-\beta\log F_{n,t}$;
+- stocks-to-use, surprise, percentile, or forecast revision.
+
+A price level can be non-stationary while a return, basis, or cointegrating residual is stationary. Applying an autoregression to a non-stationary level can produce apparently significant relationships that do not describe a stable forecast mechanism. Conversely, differencing a physically meaningful balance variable can remove the scarcity state that a model is intended to use.
+
+The transformation must therefore answer three questions:
+
+1. What is the economic state or payoff being modelled?
+2. What is the stochastic property required by the estimator?
+3. What is the time and contract mapping from the estimate to a trade?
+
+A seasonal adjustment is also a model choice. Removing a delivery-month average from a price can help reveal residual dynamics, but it can also remove a predictable return component or create a look-ahead if the average was estimated with later crop years.
+
+## 2. Mean reversion: estimate the discrete transition, not a slogan
+
+A continuous-time Ornstein–Uhlenbeck state
+
+$$
+ dx_t=\kappa(\theta-x_t)\,dt+\sigma\,dW_t
+$$
+
+has an exact discrete transition over interval $\Delta$,
+
+$$
+ x_{t+\Delta}
+=\theta(1-\phi)+\phi x_t+\varepsilon_{t+\Delta},
+\qquad
+\phi=e^{-\kappa\Delta},
+$$
+
+with
+
+$$
+\operatorname{Var}(\varepsilon_{t+\Delta})
+=\frac{\sigma^2}{2\kappa}(1-e^{-2\kappa\Delta}).
+$$
+
+The half-life is $\log(2)/\kappa$. An estimated autoregressive coefficient $\widehat{\phi}$ should be converted to $\widehat{\kappa}=-\log(\widehat{\phi})/\Delta$ only when $0<\widehat{\phi}<1$ and the sampling interval is declared.
+
+The model is useful for a basis or spread only if the object itself has a credible convergence mechanism. A statistical half-life does not prove that a calendar spread will converge before delivery, that a basis will converge at the expected location, or that a position can survive interim widening.
+
+The following regression estimates the discrete transition transparently. The intercept and lag coefficient are estimated from the sample available at the decision date; the example is not a claim about any commodity.
+
+```{python}
+#| label: ch8-mean-reversion-estimate
+
+state = np.array(
+    [
+        0.18, 0.15, 0.12, 0.10, 0.08, 0.06,
+        0.05, 0.04, 0.03, 0.025, 0.020, 0.016,
+    ]
+)
+lagged = state[:-1]
+current = state[1:]
+X = np.column_stack([np.ones_like(lagged), lagged])
+intercept, phi = np.linalg.lstsq(X, current, rcond=None)[0]
+interval_years = 1 / 12
+kappa = -np.log(phi) / interval_years
+long_run_level = intercept / (1 - phi)
+half_life_months = np.log(2) / kappa / interval_years
+
+pd.DataFrame(
+    {
+        "phi": [phi],
+        "kappa_per_year": [kappa],
+        "long_run_level": [long_run_level],
+        "half_life_months": [half_life_months],
+    }
+).round(4)
+```
+
+The next research step is not to trade the estimated residual immediately. It is to evaluate parameter stability by crop year, contract pair, window, and regime, then compare the forecast against a no-change, seasonal, carry, and fundamental benchmark.
+
+## 3. Cointegration is a hedgeability hypothesis
+
+Two non-stationary price series $y_t$ and $x_t$ are cointegrated if a linear combination is stationary,
+
+$$
+ z_t=y_t-\beta x_t
+$$
+
+with $z_t\sim I(0)$ while $y_t,x_t\sim I(1)$. The coefficient $\beta$ is a hedge or equilibrium parameter only under a declared economic and statistical design.
+
+A cointegrating regression can be useful for inter-commodity or processing relationships, but correlation alone is insufficient. Two prices may correlate because of a common trend and still have a residual that drifts without a reliable convergence mechanism. Conversely, a physical transformation such as a crush or refining margin imposes quantities, prices, and conversion factors before statistical estimation begins.
+
+An error-correction representation is
+
+$$
+\Delta y_t
+=\alpha_y z_{t-1}
++\sum_{j=1}^{p}\Gamma_{yj}\Delta y_{t-j}
++\sum_{j=1}^{p}\Lambda_{yj}\Delta x_{t-j}
++u_{y,t},
+$$
+
+with an analogous equation for $\Delta x_t$. The coefficient $\alpha_y$ describes how $y$ responds to disequilibrium in the specified model; it is not automatically a tradable speed of convergence.
+
+For an agricultural spread, the research record should preserve:
+
+- the economic conversion ratio;
+- the price and unit transformations;
+- the sample and contract mapping;
+- the test for a stationary residual;
+- the hedge ratio estimation window;
+- the convergence horizon and failure rule;
+- the liquidity and delivery conditions.
+
+A spread can be statistically stationary and still have unacceptable tail loss, margin requirements, or execution cost.
+
+## 4. Conditional volatility is part of the forecast distribution
+
+A return forecast without a volatility forecast is incomplete for position sizing and risk. A basic GARCH(1,1) model is
+
+$$
+\begin{aligned}
+r_t &=\mu_t+\varepsilon_t,\\
+\varepsilon_t&=\sigma_t z_t,\\
+\sigma_t^2&=\omega+\alpha\varepsilon_{t-1}^2+\beta\sigma_{t-1}^2,
+\end{aligned}
+$$
+
+where $z_t$ has zero mean and unit variance. The usual persistence condition is $\alpha+\beta<1$ for a finite unconditional variance in the basic specification.
+
+Agricultural volatility often needs more structure:
+
+- delivery-month seasonality;
+- report-event indicators;
+- asymmetric response to price shocks;
+- jumps or limit moves;
+- volatility-of-volatility;
+- cross-commodity and curve-factor correlation;
+- different physical regimes.
+
+A model can be statistically adequate for ordinary days and fail exactly when the portfolio is most exposed. Volatility forecasting should therefore be evaluated with both forecast errors and stress scenarios.
+
+Realized volatility also needs a contract design. For returns $r_{t,k}$ within a day,
+
+$$
+\mathrm{RV}_t=\sum_k r_{t,k}^2
+$$
+
+is not comparable across a liquid nearby contract, a deferred contract, and a rolled series unless the timestamps and contract identity are controlled. A report-day move can be a jump rather than a high-frequency diffusion variance; the distinction matters for option hedging.
+
+## 5. Regime models must be filtered in real time
+
+A regime-switching model introduces a latent state $s_t\in\{1,\ldots,K\}$ with transition probabilities
+
+$$
+\Pr(s_t=j\mid s_{t-1}=i)=p_{ij}.
+$$
+
+A return or volatility distribution can depend on the regime,
+
+$$
+ r_t\mid s_t=k\sim\mathcal{D}(\mu_k,\sigma_k,\ldots).
+$$
+
+In agricultural markets, regimes may be labelled descriptively as abundant, balanced, or scarce, but the statistical state is not identical to a physical inventory measure. The mapping must be validated rather than imposed after seeing the P&L.
+
+The critical timing distinction is:
+
+- a **filtered** probability uses observations through $t$;
+- a **smoothed** probability uses future observations and is appropriate for historical diagnosis, not live signal generation.
+
+Using smoothed regimes in a backtest is look-ahead bias even if the code appears to use a lagged position. Regime labels can also be unstable when parameters are re-estimated, so strategy rules should be tested against probability thresholds and parameter uncertainty rather than hard historical labels.
+
+## 6. Machine learning earns a place only through incremental evidence
+
+Machine learning can estimate nonlinear interactions among balances, curves, weather, positioning, and volatility. It can also turn a small agricultural sample into a high-dimensional multiple-testing machine.
+
+A disciplined sequence is:
+
+1. state the mechanism and benchmark forecast;
+2. construct point-in-time features and preserve release timestamps;
+3. define the target horizon and tradable price object;
+4. split by time, not randomly;
+5. tune only inside the training window;
+6. compare against simple economic and statistical baselines;
+7. translate forecasts into positions with costs and risk limits;
+8. report feature stability, turnover, capacity, and failure regimes.
+
+A model that improves in-sample $R^2$ but increases turnover and does not improve net P&L has not demonstrated economic value. A model that improves rank correlation but changes sign across crop years may be a regime detector rather than a stable signal. Model complexity should be justified by incremental out-of-sample evidence.
+
+Avoid using feature importance as causal explanation. A model can assign importance to a revised USDA number, a post-release curve value, or a proxy for the target because of leakage or timestamp misalignment. Data lineage is more important than a sophisticated estimator.
+
+## 7. From forecast to position
+
+Let $\widehat{\mu}_{t,h}$ and $\widehat{\sigma}_{t,h}$ be a point-in-time forecast of return and risk over horizon $h$. A simple risk-adjusted score is
+
+$$
+\widehat{z}_{t,h}
+=\frac{\widehat{\mu}_{t,h}}
+{\widehat{\sigma}_{t,h}}.
+$$
+
+A trade should be opened only when the expected economic value exceeds costs and model uncertainty. In a simplified linear setting,
+
+$$
+\text{expected net P\&L}
+=\text{forecast gross P\&L}
+-\text{bid--ask}
+-\text{market impact}
+-\text{financing and margin cost}
+-\text{expected hedge and model error}.
+$$
+
+The position rule may be a clipped score, a volatility target, a quantile decision, or an optimization subject to risk budgets. The exact choice is less important than preserving the chain from forecast distribution to executable position.
+
+Forecast evaluation should include:
+
+- calibration of predictive intervals;
+- directional or rank accuracy only when relevant to the trade;
+- forecast error by crop year and regime;
+- net P&L and turnover;
+- capacity and liquidity;
+- drawdown and tail loss;
+- stability under parameter and feature perturbations.
+
+A forecast is not a position, and a position is not a portfolio. Each transformation introduces assumptions that must be tested separately.
+
+## 8. Econometric validation record
+
+Every dynamic model should report:
+
+| Record | Required detail |
+|:--|:--|
+| Object | Exact price, spread, basis, volatility, or fundamental variable |
+| Information set | Release timestamps, revisions, and available market observations |
+| Transformation | Logs, returns, seasonal adjustment, deflation, and units |
+| Estimation | Window, frequency, initialization, constraints, and parameter uncertainty |
+| Forecast | Horizon, target contract, distribution, and benchmark |
+| Decision rule | Position mapping, lag, costs, and risk cap |
+| Validation | Out-of-sample design, regimes, multiple testing, and failure cases |
+
+The research code should make this record machine-readable. A model that cannot state its information set cannot support a credible trading result, regardless of its statistical sophistication.
+
+## Review checkpoint
+
+1. Why is a mean-reversion half-life not automatically a holding period?
+2. What is the economic content of a cointegrating hedge ratio?
+3. Why must realized volatility preserve contract identity and timestamps?
+4. What is the difference between filtered and smoothed regime probabilities?
+5. Which form of leakage is most likely in a report-driven agricultural model?
+6. Why should a forecast be evaluated as a distribution rather than only a point prediction?
+7. What incremental evidence would justify replacing a simple benchmark with a machine-learning model?
+
+## Focused reading
+
+- Geman, *Commodities and Commodity Derivatives*, for stochastic commodity-price models and agricultural applications [@geman2005].
+- Geman (ed.), *Risk Management in Commodity Markets*, for commodity modelling, structural breaks, and risk management [@geman2008risk].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for forecasting and systematic commodity strategies [@fabozzi2008].
+
+The next chapter addresses the research process itself: point-in-time backtests, execution, costs, capacity, performance attribution, and model governance.

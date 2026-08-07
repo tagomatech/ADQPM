@@ -1,0 +1,369 @@
+---
+title: "Chapter 10 — Integrated corn derivatives portfolio case"
+description: "A first-pass research and portfolio blueprint that connects agricultural information, futures, options, risk budgets, and auditable P&L."
+---
+
+```{python}
+#| label: ch10-setup
+#| echo: false
+
+import numpy as np
+import pandas as pd
+```
+
+## Case purpose and scope
+
+The preceding chapters developed separate components. This final chapter assembles them into one research object:
+
+> Can a corn derivatives portfolio transform physical information and curve/volatility observations into positions whose P&L, risk, costs, and failure modes can be reconstructed at every decision timestamp?
+
+This is a case architecture, not a claimed historical strategy. It uses illustrative numbers and a synthetic scenario fixture. No performance result should be inferred from the examples. The purpose is to define the standard that a later public-data or terminal-connected study must meet.
+
+The case includes:
+
+1. a mandate and risk budget;
+2. a contract-level universe;
+3. point-in-time physical and market data;
+4. a small set of distinct hypotheses;
+5. position construction and risk aggregation;
+6. P&L attribution and stress testing;
+7. validation, monitoring, and research deliverables.
+
+The case should be implemented in layers. A deterministic fixture must pass accounting and unit tests before historical data or live observations are introduced.
+
+## 1. Mandate and risk budget
+
+A portfolio mandate should state what it is allowed to do before any signal is calculated. An illustrative mandate is:
+
+| Mandate field | First-pass declaration |
+|:--|:--|
+| Market | CBOT Corn futures and options on specified corn futures |
+| Objective | Risk-adjusted return from curve, physical, and volatility hypotheses |
+| Reporting currency | USD |
+| Decision frequency | Daily, with event-time review where specified |
+| Capital reference | A declared risk capital base, not unbounded notional |
+| Target ordinary volatility | A fixed annualised target with scaling bounds |
+| Gross exposure | Hard contract and currency limit |
+| Near-delivery exposure | Separate cap and escalation rule |
+| Short-gamma/event risk | Explicit scenario-loss limit |
+| Liquidity | Position size bounded by executable depth and exit horizon |
+| Data rule | Only observations available at the decision timestamp |
+| Exit rule | Hypothesis invalidation, risk limit, horizon, or contract lifecycle |
+
+The mandate should also define what the portfolio is not allowed to do. Examples include using a revised balance-sheet number before its publication, holding a contract into a prohibited delivery window, treating an option’s delta as a complete risk measure, or increasing risk solely because recent realised volatility fell.
+
+The portfolio risk budget can be split by mechanism rather than by ticker:
+
+$$
+\text{total risk budget}
+=\text{curve}
++\text{physical/basis}
++\text{volatility}
++\text{event}
++\text{residual and liquidity buffer}.
+$$
+
+The sum is not necessarily a linear variance decomposition; it is a governance allocation that must be checked with covariance and scenarios.
+
+## 2. The contract-level universe
+
+The public research object should retain every contract identity. A minimal futures panel contains:
+
+| Field | Example or requirement |
+|:--|:--|
+| Root and exchange | CBOT Corn |
+| Delivery month | Contract-specific month and year |
+| Delivery date | Explicit economic exposure date |
+| Last trading and notice dates | Lifecycle and delivery controls |
+| Settlement price | Timestamped, quoted per bushel |
+| Multiplier and tick size | Currency P&L conversion |
+| Volume and open interest | Liquidity diagnostics |
+| Contract status | Listed, active, near delivery, expired |
+
+The option panel adds:
+
+- option expiry and exercise style;
+- underlying futures contract identifier;
+- strike and quotation unit;
+- bid, ask, settlement, and timestamp;
+- implied volatility and surface coordinates if supplied;
+- open interest, volume, and spread width.
+
+A continuous nearby series may be generated for a descriptive chart, but the case portfolio must trade and mark identified contracts. The portfolio cannot attribute P&L to a curve factor if the contract mapping was discarded.
+
+## 3. Information set and research clock
+
+At each decision timestamp $t$, construct
+
+$$
+\mathcal{I}_t
+=\{
+\text{market panel}_t,
+\text{physical vintages}_t,
+\text{expectations}_t,
+\text{release calendar}_t,
+\text{portfolio state}_t
+\}.
+$$
+
+The physical component may include:
+
+- production, use, exports, and ending stocks;
+- stocks-to-use and its revision or surprise;
+- basis by location and grade;
+- crop progress, weather summaries, and forecast changes;
+- policy, logistics, and export information.
+
+The market component may include:
+
+- outright futures prices and returns;
+- deferred-nearby spreads and carry measures;
+- contract-level volume and open interest;
+- option prices, implied volatility, skew, and term structure;
+- margin, liquidity, and delivery-state indicators.
+
+The key record is not just the feature value. It is the feature value, its vintage, the expectation against which it is measured, and the timestamp at which it became tradable.
+
+A decision record should look conceptually like:
+
+| Timestamp | Physical vintage | Market vintage | Hypothesis | Position action |
+|:--|:--|:--|:--|:--|
+| $t$ | Latest available balance and revision | Contract panel marked at $t$ | Curve, basis, or event-vol view | Target quantity after risk controls |
+| $t+1$ | Updated only if released | New marks and liquidity | Forecast and risk update | Rebalance, hold, or exit |
+
+No result is valid until this clock is explicit.
+
+## 4. Distinct hypotheses, not a pile of signals
+
+The case should begin with a small number of economically distinct hypotheses.
+
+### Curve hypothesis
+
+A curve feature such as deferred-minus-nearby carry is a state variable or risk premium proxy, not a guaranteed return. The hypothesis must state:
+
+- which delivery pair is used;
+- how storage, financing, and exchange rules enter interpretation;
+- whether the position is outright or spread;
+- the convergence or roll mechanism;
+- the regime in which the signal is expected to work.
+
+### Physical/basis hypothesis
+
+A balance-sheet or basis feature should be conditional on demand, exports, location, quality, crop year, and market expectations. The tradable expression may be a futures position, calendar spread, basis hedge, or option structure. The position should not be sized from stocks-to-use alone.
+
+### Event-volatility hypothesis
+
+For a report or weather event, compare a physical event-move distribution with the option surface after costs and risk premia. Specify whether the trade is long or short gamma, which expiry captures the event, and how post-event volatility and liquidity are marked.
+
+These hypotheses should be tested separately before they are combined. Combining several weak signals can make attribution impossible and can hide that the portfolio is carrying one dominant risk.
+
+## 5. Position construction and portfolio mapping
+
+The research output at time $t$ should be a target portfolio, not a raw score. For each position, record:
+
+$$
+\text{target position}_t
+=\text{signal interpretation}
+\times\text{risk scaling}
+\times\text{liquidity cap}
+\times\text{mandate constraints}.
+$$
+
+The target must then be converted into executable orders using contract multipliers, tick size, margin, and the portfolio’s existing positions. The case should calculate both ordinary local risk and structural factor exposure.
+
+An illustrative target book is:
+
+```{python}
+#| label: ch10-target-book
+
+book = pd.DataFrame(
+    {
+        "instrument": [
+            "long Dec corn futures",
+            "short Dec/Sep calendar spread",
+            "long post-report put spread",
+        ],
+        "quantity": [3, -4, 8],
+        "multiplier": [5_000, 5_000, 5_000],
+        "price_change": [0.08, -0.025, -0.03],
+        "delta": [1.00, 1.00, -0.22],
+        "gamma": [0.00, 0.00, 0.11],
+        "vega_per_volatility_unit": [0.00, 0.00, 0.09],
+        "volatility_change": [0.00, 0.00, 0.06],
+        "transaction_cost": [420.0, 360.0, 1_150.0],
+    }
+)
+
+book["linear_or_delta_pnl"] = (
+    book["quantity"]
+    * book["multiplier"]
+    * book["delta"]
+    * book["price_change"]
+)
+book["gamma_pnl"] = (
+    0.5
+    * book["quantity"]
+    * book["multiplier"]
+    * book["gamma"]
+    * book["price_change"] ** 2
+)
+book["vega_pnl"] = (
+    book["quantity"]
+    * book["multiplier"]
+    * book["vega_per_volatility_unit"]
+    * book["volatility_change"]
+)
+book["net_pnl"] = (
+    book["linear_or_delta_pnl"]
+    + book["gamma_pnl"]
+    + book["vega_pnl"]
+    - book["transaction_cost"]
+)
+
+book[["instrument", "linear_or_delta_pnl", "gamma_pnl", "vega_pnl", "transaction_cost", "net_pnl"]].round(2)
+```
+
+The case must not report this synthetic P&L as a result. Its role is to test whether the accounting layers agree: quantity, multiplier, delta, gamma, vega, and costs all map into a declared currency convention.
+
+## 6. Daily attribution and risk report
+
+The daily report should reconcile the portfolio to both positions and mechanisms.
+
+### P&L attribution
+
+$$
+\begin{aligned}
+\Delta\Pi_t
+={}&\text{futures outright}\
+&+\text{calendar and curve}\
+&+\text{basis}\
+&+\text{option delta}\
+&+\text{option gamma}\
+&+\text{volatility surface}\
+&+\text{carry/theta}\
+&-\text{costs}\
+&+\text{residual}.
+\end{aligned}
+$$
+
+### Risk report
+
+The daily risk report should show:
+
+- position and notional by contract and delivery month;
+- futures-equivalent delta by commodity and curve bucket;
+- gamma, vega, and event-expiry exposure;
+- covariance volatility, VaR, and Expected Shortfall;
+- scenario loss under crop shortfall, demand shock, report gap, delivery squeeze, and liquidity stress;
+- margin and collateral usage;
+- turnover, bid–ask, and market-impact estimate;
+- distance to every limit;
+- changes from the prior report and the reason for each.
+
+The report should distinguish calculated risk from risk that is not modelled. For example, a delivery-location mismatch may be outside a financial covariance model but still require a hard operational limit.
+
+## 7. Validation programme
+
+The first public implementation should be staged.
+
+### Stage A: deterministic accounting
+
+- contract multipliers and tick values;
+- futures and spread P&L;
+- option payoff and Black–76 marks;
+- Greeks and scenario revaluation;
+- costs and currency conversion;
+- attribution reconciliation.
+
+### Stage B: synthetic dynamics
+
+- state-space curve observations;
+- seasonal delivery mapping;
+- volatility surface scenarios;
+- covariance and risk contribution calculations;
+- regime and event fixtures.
+
+### Stage C: redistributable historical data
+
+- public physical vintages;
+- contract-level futures history;
+- public option or volatility observations where rights permit;
+- point-in-time expectations and release timestamps;
+- walk-forward signal and portfolio tests.
+
+### Stage D: controlled private-data adapter
+
+A terminal-connected or proprietary-data adapter may provide richer coverage, but it must return the same domain objects and preserve the same timestamp, contract, and provenance requirements. Private data should improve coverage, not change the accounting standard.
+
+At every stage, the implementation must compare the result with a simpler benchmark. A complex portfolio that cannot beat or explain a simple outright, spread, or volatility benchmark has not earned its complexity.
+
+## 8. What the capstone can and cannot claim
+
+A successful first pass can demonstrate that:
+
+- physical and market observations are aligned at decision time;
+- contracts and option terms are mapped correctly;
+- signals become defined positions;
+- risk budgets and stress limits bind the portfolio;
+- P&L can be attributed and reconciled;
+- the research record is reproducible.
+
+It cannot demonstrate, without a proper historical study:
+
+- a universal stocks-to-use price law;
+- a stable curve risk premium;
+- a persistent implied-volatility risk premium;
+- a profitable strategy after realistic costs;
+- a model that remains valid across all crop years and regimes.
+
+The correct conclusion from an initial implementation is therefore conditional. It should state which hypotheses were tested, which evidence supported them, where the data were limited, and which risks remain unmeasured.
+
+## 9. First-pass deliverables
+
+The complete research case should produce:
+
+1. a contract-level data schema and provenance record;
+2. a point-in-time physical and market panel;
+3. a signal specification for each hypothesis;
+4. a target-position and order record;
+5. a portfolio risk report with limits and scenarios;
+6. a daily P&L and attribution ledger;
+7. a walk-forward evaluation with costs and capacity;
+8. a model and configuration version;
+9. a review document listing failures, exclusions, and unresolved assumptions.
+
+These deliverables are more valuable than an impressive chart without a decision-time record. They make the portfolio auditable and create a foundation for later empirical improvement.
+
+## Final review checkpoint
+
+1. Can the entire portfolio be reconstructed from the information available at each decision timestamp?
+2. Does each position have a stated economic mechanism, risk budget, and exit condition?
+3. Are curve, basis, volatility, delivery, liquidity, and model risks separately visible?
+4. Does the daily P&L reconcile to contract quantities, marks, costs, and attribution?
+5. Which claims are deterministic fixtures, which are estimated relationships, and which are simulated or backtested results?
+6. What evidence would cause each hypothesis to be rejected?
+7. Which part of the system remains too uncertain to deploy or scale?
+
+## Closing perspective
+
+Agricultural derivatives portfolio management is an interaction between physical state, forward-curve structure, derivative pricing, statistical evidence, execution, and risk governance. No single balance-sheet ratio, curve slope, option-implied volatility, econometric model, or optimizer is the portfolio.
+
+The professional standard is the complete chain:
+
+$$
+\text{physical information}
+\longrightarrow
+\text{market state}
+\longrightarrow
+\text{pricing and forecast model}
+\longrightarrow
+\text{tradable position}
+\longrightarrow
+\text{risk budget}
+\longrightarrow
+\text{executed P\&L}
+\longrightarrow
+\text{attribution and revision}.
+$$
+
+The handbook should stop adding theory when a new chapter no longer improves a decision in that chain. Further development belongs in empirical case studies, appendices, implementation documentation, and carefully versioned research records.
