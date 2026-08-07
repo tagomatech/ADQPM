@@ -1,0 +1,312 @@
+---
+title: "Chapter 9 — Backtesting, attribution, and research governance"
+description: "How an agricultural trading hypothesis becomes auditable evidence rather than an attractive historical chart."
+---
+
+```{python}
+#| label: ch9-setup
+#| echo: false
+
+import numpy as np
+import pandas as pd
+```
+
+## Chapter question and learning outcomes
+
+A backtest is a historical reconstruction of decisions. It is not a chart of what would have happened if the researcher had known the future and traded an uncosted continuous series.
+
+The central question is:
+
+> What controls are required for a research result to remain meaningful when contract identity, information timing, execution, costs, capacity, and multiple testing are treated as part of the strategy?
+
+This chapter develops:
+
+1. the decision-time architecture of a backtest;
+2. contract-level execution and roll treatment;
+3. transaction costs, market impact, and capacity;
+4. performance measurement and uncertainty;
+5. P&L attribution from signal to realised result;
+6. multiple-testing discipline and research governance;
+7. a reproducible research record.
+
+The standard is not that every backtest becomes perfect. The standard is that every material assumption is visible and its effect can be challenged.
+
+## 1. A backtest is a sequence of information and decisions
+
+At decision time $t$, define the information set $\mathcal{I}_t$ as all data actually available after the relevant release and market timestamp. A strategy should be represented as
+
+$$
+\mathcal{I}_t
+\longrightarrow
+\text{feature}_t
+\longrightarrow
+\text{forecast}_t
+\longrightarrow
+\text{target position}_t
+\longrightarrow
+\text{order}_t
+\longrightarrow
+\text{fill}_t
+\longrightarrow
+\Delta\Pi_{t+1}.
+$$
+
+The position used to earn the next return must be measurable with respect to $\mathcal{I}_t$. If a report is released after the settlement used for the signal, it cannot enter the signal until the next valid decision timestamp. If a fundamental number is later revised, the backtest must use the vintage that was available then.
+
+A useful data record has separate timestamps for:
+
+- observation date;
+- publication or release date;
+- market availability date and time;
+- decision timestamp;
+- order submission and fill timestamp;
+- settlement timestamp;
+- contract delivery and last-trading dates.
+
+The dates are not interchangeable. A daily data set that keeps only one date cannot prove that it respected the information set.
+
+## 2. Contract identity and execution are part of the strategy
+
+For a linear contract, a simple net P&L equation is
+
+$$
+\Delta\Pi_{t+1}
+=q_tM\left(P_{t+1}^{\mathrm{exit}}-P_t^{\mathrm{entry}}\right)
+-\mathrm{costs}_{t+1}
+-\mathrm{financing}_{t+1}
+-\mathrm{margin\ effects}_{t+1}.
+$$
+
+The exact entry and exit prices depend on the execution rule. A strategy that trades at the close must define whether the signal was known before the close, whether the fill is at settlement or a realistic executable price, and how the spread between them is modelled.
+
+A continuous contract series hides at least three choices:
+
+1. which listed contract is used;
+2. when the position rolls;
+3. how the price jump at the roll is represented.
+
+A roll-adjusted price can be useful for visualisation, but its return is not a cash P&L until the roll transaction is included. For a calendar-spread strategy, the two legs should remain explicit. For an option strategy, the option expiry, strike, futures delivery month, exercise rule, and implied-volatility mark must remain explicit.
+
+Transaction costs should include at least:
+
+- bid–ask spread;
+- exchange and clearing fees;
+- brokerage and financing;
+- market impact as a function of size and liquidity;
+- roll cost and slippage;
+- option exercise or assignment effects;
+- FX conversion where relevant.
+
+A cost model should be conservative enough to identify whether the result depends on a favourable execution assumption. It should also be tested across liquidity regimes rather than held constant when volume and spreads change.
+
+## 3. Signal-to-P&L implementation
+
+Suppose $s_t$ is a signal and $g(\cdot)$ maps it into a target position. With one-period return $r_{t+1}$ and turnover $\mathrm{TO}_{t+1}=|q_{t+1}-q_t|$, a simple net return is
+
+$$
+R_{t+1}^{\mathrm{net}}
+=q_t r_{t+1}
+-c_{t+1}\mathrm{TO}_{t+1},
+$$
+
+where $c_{t+1}$ is a cost per unit turnover in the same return convention. In a contract-level implementation, replace the return notation with quantity, multiplier, price change, and currency costs.
+
+The signal must be lagged relative to the return it is intended to forecast. Position changes should be applied at the next executable timestamp, not implicitly at the same price used to calculate the signal.
+
+```{python}
+#| label: ch9-lagged-backtest
+
+returns = np.array([0.010, -0.006, 0.014, -0.012, 0.008, 0.003, -0.009, 0.011])
+signal = np.array([0.00, 0.80, 0.40, -0.60, -0.30, 0.50, 0.70, -0.20])
+
+# The position earning return t is the signal known before that return.
+position = np.r_[0.0, signal[:-1]]
+turnover = np.abs(np.diff(np.r_[0.0, position]))
+cost_per_unit_turnover = 0.0015
+net_returns = position * returns - cost_per_unit_turnover * turnover
+
+performance = pd.DataFrame(
+    {
+        "return": returns,
+        "signal": signal,
+        "lagged_position": position,
+        "turnover": turnover,
+        "gross_return": position * returns,
+        "cost": cost_per_unit_turnover * turnover,
+        "net_return": net_returns,
+    }
+)
+performance.round(5)
+```
+
+The example makes the lag visible. A production backtest must also align holidays, missing settlements, contract listings, release calendars, and execution windows. The most common error is not a sophisticated statistical mistake; it is an unnoticed timestamp mismatch.
+
+## 4. Performance is a distribution with a mechanism
+
+Common metrics include:
+
+- mean and volatility of net P&L;
+- Sharpe ratio and its uncertainty;
+- Sortino ratio and downside deviation;
+- maximum drawdown and recovery time;
+- hit rate, payoff ratio, and tail loss;
+- turnover, cost, and capacity;
+- information ratio relative to a declared benchmark;
+- Calmar ratio relative to drawdown;
+- skewness and serial dependence;
+- margin and liquidity usage.
+
+A Sharpe ratio is a summary of a sample, not a probability that the strategy will work. Its interpretation is distorted by non-normal returns, serial correlation, changing volatility, overlapping observations, and repeated strategy selection. A high historical ratio after testing many signals is not equivalent to a high ex ante ratio.
+
+Performance should be reported by:
+
+- crop year and calendar regime;
+- contract month and delivery bucket;
+- signal family and holding horizon;
+- long and short trades;
+- ordinary and event periods;
+- gross return, cost, and net return;
+- risk budget and capital usage.
+
+```{python}
+#| label: ch9-performance-summary
+
+net = performance["net_return"].to_numpy()
+annualisation = 252
+mean_annual = net.mean() * annualisation
+vol_annual = net.std(ddof=1) * np.sqrt(annualisation)
+sharpe = mean_annual / vol_annual if vol_annual > 0 else np.nan
+wealth = np.cumprod(1.0 + net)
+peak = np.maximum.accumulate(wealth)
+drawdown = wealth / peak - 1.0
+
+summary = pd.DataFrame(
+    {
+        "annualised_mean": [mean_annual],
+        "annualised_volatility": [vol_annual],
+        "sample_sharpe": [sharpe],
+        "maximum_drawdown": [drawdown.min()],
+        "total_turnover": [performance["turnover"].sum()],
+        "total_cost": [performance["cost"].sum()],
+    }
+)
+summary.round(5)
+```
+
+The output is intentionally not presented as evidence: the sample is tiny and synthetic. The code demonstrates how cost and drawdown enter the record. Any real result must include uncertainty, out-of-sample design, and the number of research variants examined.
+
+## 5. Multiple testing changes the evidence threshold
+
+If many signals, parameter windows, contract pairs, seasonal definitions, cost assumptions, and entry rules are tested, some will appear successful by chance. The relevant selection problem is not only the number of published strategies; it is the number of economically distinct choices explored during research.
+
+Controls include:
+
+- a pre-declared primary hypothesis;
+- a benchmark and a reason for every added feature;
+- walk-forward or nested out-of-sample testing;
+- a research log containing rejected variants;
+- validation on a later period or independent market;
+- correction for selection and non-normality;
+- a capacity and cost sensitivity analysis.
+
+The deflated Sharpe ratio is one framework for adjusting the interpretation of an observed Sharpe for multiple testing, non-normality, and selection bias [@bailey2014]. It is not a replacement for economic reasoning or a licence to search until a corrected statistic passes.
+
+A useful discipline is to distinguish:
+
+- **exploration:** hypothesis generation and descriptive analysis;
+- **confirmation:** a locked specification evaluated on untouched data;
+- **deployment:** live or paper-trading evidence with decision-time data;
+- **monitoring:** tests for decay, regime change, and implementation drift.
+
+The data used for confirmation must not be repeatedly used to redesign the model. Otherwise the test set has become training data.
+
+## 6. P&L attribution connects research to risk
+
+A portfolio result should be decomposed into economically meaningful sources. For a futures and option portfolio, an attribution may include:
+
+$$
+\text{net P\&L}
+=\text{outright move}
++\text{curve move}
++\text{basis move}
++\text{volatility move}
++\text{gamma and rebalancing}
++\text{carry and roll}
++\text{FX}
+-\text{costs}
++\text{residual}.
+$$
+
+The residual is not automatically noise. It can identify a missing contract mapping, stale settlement, unmodelled skew movement, a sign error, or an omitted operational event.
+
+Attribution should be performed at two levels:
+
+1. **ex ante attribution:** which factors and scenarios were expected to drive the position?
+2. **ex post attribution:** which realised changes produced the P&L?
+
+The two should be compared. A strategy intended to harvest curve carry but making most of its return from outright direction is not necessarily bad, but it is a different strategy with a different risk budget.
+
+A portfolio-level attribution should reconcile to cash P&L within a declared tolerance. Tolerance must be monitored by instrument, delivery month, and event window rather than only at total-book level.
+
+## 7. Capacity and implementation are empirical properties
+
+Capacity is not a fixed percentage of average volume. It depends on:
+
+- position size relative to displayed and replenishing depth;
+- trading horizon and urgency;
+- seasonality of liquidity;
+- delivery-month concentration;
+- market impact and information leakage;
+- the ability to unwind after a report or limit move;
+- margin and collateral availability;
+- whether the strategy can trade spreads as a package.
+
+A capacity test should scale the intended position and recompute net P&L, turnover, slippage, margin, and tail loss. If the edge disappears at a modest size increase, the strategy should be described as capacity-constrained rather than portfolio scalable.
+
+The correct output is a range of net performance under execution assumptions, not a single backtest with one cost parameter.
+
+## 8. Research governance and reproducibility
+
+A research result should be reproducible from a versioned record containing:
+
+| Component | Example |
+|:--|:--|
+| Hypothesis | Curve spread excess return after carry and costs |
+| Universe | Listed CBOT Corn delivery contracts available at each date |
+| Data vintage | Physical report revision and market timestamp |
+| Transformation | Seasonal adjustment, spread sign, return horizon |
+| Parameters | Window, thresholds, volatility estimator, constraints |
+| Execution | Signal lag, order rule, fill and cost model |
+| Risk | Position cap, volatility target, stress limits |
+| Evaluation | Out-of-sample period, benchmarks, metrics, attribution |
+| Version | Code commit, data snapshot, and configuration |
+
+Model governance should also define when a model is paused, reviewed, or retired. A drawdown alone is not necessarily a failure; a broken data lineage, unstable contract mapping, or unanticipated risk mechanism may require immediate action even before the drawdown is large.
+
+The implementation framework should separate:
+
+- domain objects for contracts, curves, options, and physical data;
+- research transformations and estimators;
+- portfolio and risk calculations;
+- execution and cost assumptions;
+- reporting and audit records.
+
+This separation lets the same accounting and risk logic support notebooks, tests, live adapters, and the public book without turning the book into an undocumented software tutorial.
+
+## Review checkpoint
+
+1. What is the precise information set for a signal at its decision timestamp?
+2. Why is a roll-adjusted price not automatically a tradable return?
+3. Which cost assumptions are most likely to change a low-turnover agricultural strategy?
+4. Why does multiple testing include discarded research variants?
+5. What should appear in the residual of a P&L attribution?
+6. How can capacity be tested without pretending that average volume is executable depth?
+7. What evidence should cause a model to be paused or retired?
+
+## Focused reading
+
+- Bailey et al., “The Deflated Sharpe Ratio,” for selection bias, non-normality, and backtest-overfitting controls [@bailey2014].
+- Geman (ed.), *Risk Management in Commodity Markets*, for commodity risk and portfolio implementation [@geman2008risk].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for performance measurement and systematic commodity strategies [@fabozzi2008].
+
+The final chapter is an integrated corn-derivatives case. It will not introduce another large model; it will show how the preceding theory becomes a complete, auditable research and portfolio workflow.

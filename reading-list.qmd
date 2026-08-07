@@ -33,6 +33,10 @@ This is a working source map rather than a reading list to complete before study
 - USDA, WASDE documentation: publication context for supply-and-use estimates and revisions [@usdaWasde].
 - U.S. CFTC, Commitments of Traders reports: report timing, categories, and position data conventions [@cftcCot].
 
+## Backtesting and research governance {.unnumbered}
+
+- Bailey et al., “The Deflated Sharpe Ratio”: selection bias, non-normality, and the interpretation of backtest performance [@bailey2014].
+- Fabozzi, Füss, and Kaiser, *The Handbook of Commodity Investing*, for performance measurement, forecasting, and systematic commodity research [@fabozzi2008].
 ## How sources are used {.unnumbered}
 
 A source can provide a definition, a model, an empirical result, a market convention, or a hypothesis. Those roles will be kept distinct. Older theoretical sources remain valuable, but current exchange specifications, reporting conventions, data availability, and execution assumptions must be checked again when an application is built.
